@@ -31,6 +31,8 @@
 #include "esp_ping.h"
 #define ESP_PING
 #include "ping/ping.h"
+#include "drv_spi.h"
+#include "drv_canfdspi_api.h"
 
 /* The examples use simple WiFi configuration that you can set via
    project configuration menu.
@@ -77,8 +79,9 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
     {
         xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-        t2 = xTaskGetTickCount();  esp_netif_ip_info_t ip;
-    memset(&ip, 0, sizeof(esp_netif_ip_info_t));
+        t2 = xTaskGetTickCount();
+        esp_netif_ip_info_t ip;
+        memset(&ip, 0, sizeof(esp_netif_ip_info_t));
         if (esp_netif_get_ip_info(sta_netif, &ip) == 0 && (xEventGroupGetBits(wifi_event_group) & CONNECTED_BIT) != 0)
         {
             printf("~~~~~~~~~~~");
@@ -86,14 +89,14 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             printf("MASK:" IPSTR, IP2STR(&ip.netmask));
             printf("GW:" IPSTR, IP2STR(&ip.gw));
             printf("Startup: sys(%ldms) app(%ldms)", ts * 10, (t0 - ts) * 10);
-            printf("Time: config(%ldms), connect(%ldms), total(%ldms)",  pdTICKS_TO_MS(t1 - t0), (t2 - t1) * 10, (t2 - t0) * 10);
+            printf("Time: config(%ldms), connect(%ldms), total(%ldms)", pdTICKS_TO_MS(t1 - t0), (t2 - t1) * 10, (t2 - t0) * 10);
             printf("~~~~~~~~~~~");
             const char *ip = "10.5.189.99";
 
             ping_deinit();
-            uint32_t ping_count =4;
-            uint32_t ping_timeout =1000;
-            uint32_t ping_delay =1000;
+            uint32_t ping_count = 4;
+            uint32_t ping_timeout = 1000;
+            uint32_t ping_delay = 1000;
             esp_ping_set_target(PING_TARGET_IP_ADDRESS_COUNT, &ping_count, sizeof(uint32_t));
             esp_ping_set_target(PING_TARGET_RCV_TIMEO, &ping_timeout, sizeof(uint32_t));
             esp_ping_set_target(PING_TARGET_DELAY_TIME, &ping_delay, sizeof(uint32_t));
@@ -155,8 +158,8 @@ static void wpa2_enterprise_example_task(void *pvParameters)
     {
         vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-    esp_netif_ip_info_t ip;
-    memset(&ip, 0, sizeof(esp_netif_ip_info_t));
+        esp_netif_ip_info_t ip;
+        memset(&ip, 0, sizeof(esp_netif_ip_info_t));
         if (esp_netif_get_ip_info(sta_netif, &ip) == 0 && (xEventGroupGetBits(wifi_event_group) & CONNECTED_BIT) != 0)
         {
             ESP_LOGI(TAG, "~~~~~~~~~~~");
@@ -169,9 +172,9 @@ static void wpa2_enterprise_example_task(void *pvParameters)
             const char *ip = "10.5.189.99";
 
             ping_deinit();
-            uint32_t ping_count =4;
-            uint32_t ping_timeout =1000;
-            uint32_t ping_delay =1000;
+            uint32_t ping_count = 4;
+            uint32_t ping_timeout = 1000;
+            uint32_t ping_delay = 1000;
             esp_ping_set_target(PING_TARGET_IP_ADDRESS_COUNT, &ping_count, sizeof(uint32_t));
             esp_ping_set_target(PING_TARGET_RCV_TIMEO, &ping_timeout, sizeof(uint32_t));
             esp_ping_set_target(PING_TARGET_DELAY_TIME, &ping_delay, sizeof(uint32_t));
@@ -192,10 +195,170 @@ static void wpa2_enterprise_example_task(void *pvParameters)
     }
 }
 
+static void APP_CANFDSPI_Init(void *p);
 void app_main(void)
 {
     ts = xTaskGetTickCount();
     ESP_ERROR_CHECK(nvs_flash_init());
     initialise_wifi();
     // xTaskCreate(&wpa2_enterprise_example_task, "wpa2_enterprise_example_task", 4096, NULL, 5, &hdle);
+    xTaskCreate(&APP_CANFDSPI_Init, "APP_CANFDSPI_Init", 4096, NULL, 5, &hdle);
+}
+
+// Message IDs
+#define TX_REQUEST_ID 0x300
+#define TX_RESPONSE_ID 0x301
+#define BUTTON_STATUS_ID 0x201
+#define LED_STATUS_ID 0x200
+#define PAYLOAD_ID 0x101
+
+// Transmit Channels
+#define APP_TX_FIFO CAN_FIFO_CH2
+
+// Receive Channels
+#define APP_RX_FIFO CAN_FIFO_CH1
+static CAN_CONFIG config;
+static CAN_OPERATION_MODE opMode;
+
+// Transmit objects
+static CAN_TX_FIFO_CONFIG txConfig;
+static CAN_TX_FIFO_EVENT txFlags;
+static CAN_TX_MSGOBJ txObj;
+static uint8_t txd[MAX_DATA_BYTES];
+uint8_t rxd[MAX_DATA_BYTES];
+
+// Receive objects
+static CAN_RX_FIFO_CONFIG rxConfig;
+static REG_CiFLTOBJ fObj;
+static REG_CiMASK mObj;
+static CAN_RX_FIFO_EVENT rxFlags;
+static CAN_RX_MSGOBJ rxObj;
+static bool APP_TestRamAccess(void)
+{
+    // Variables
+    uint16_t i = 0;
+    uint8_t length;
+    bool good = false;
+
+    Nop();
+
+    // Verify read/write with different access length
+    // Note: RAM can only be accessed in multiples of 4 bytes
+    for (length = 4; length <= MAX_DATA_BYTES; length += 4)
+    {
+        for (i = 0; i < length; i++)
+        {
+            txd[i] = i;
+            rxd[i] = 0xff;
+        }
+
+        Nop();
+
+        // Write data to RAM
+        DRV_CANFDSPI_WriteByteArray(DRV_CANFDSPI_INDEX_0, cRAMADDR_START, txd, length);
+
+        // Read data back from RAM
+        DRV_CANFDSPI_ReadByteArray(DRV_CANFDSPI_INDEX_0, cRAMADDR_START, rxd, length);
+
+        // Verify
+        good = false;
+        for (i = 0; i < length; i++)
+        {
+            good = txd[i] == rxd[i];
+
+            if (!good)
+            {
+                Nop();
+                Nop();
+
+                // Data mismatch
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+static void APP_CANFDSPI_Init(void *p)
+{
+    //     DRV_SPI_Initialize();
+    //     // Reset device
+    //     DRV_CANFDSPI_Reset(DRV_CANFDSPI_INDEX_0);
+
+    //     // Enable ECC and initialize RAM
+    //     DRV_CANFDSPI_EccEnable(DRV_CANFDSPI_INDEX_0);
+
+    //     DRV_CANFDSPI_RamInit(DRV_CANFDSPI_INDEX_0, 0xff);
+
+    //     // Configure device
+    //     DRV_CANFDSPI_ConfigureObjectReset(&config);
+    //     config.IsoCrcEnable = 1;
+    //     config.StoreInTEF = 0;
+
+    //     DRV_CANFDSPI_Configure(DRV_CANFDSPI_INDEX_0, &config);
+
+    //     // Setup TX FIFO
+    //     DRV_CANFDSPI_TransmitChannelConfigureObjectReset(&txConfig);
+    //     txConfig.FifoSize = 7;
+    //     txConfig.PayLoadSize = CAN_PLSIZE_64;
+    //     txConfig.TxPriority = 1;
+
+    //     DRV_CANFDSPI_TransmitChannelConfigure(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &txConfig);
+
+    //     // Setup RX FIFO
+    //     DRV_CANFDSPI_ReceiveChannelConfigureObjectReset(&rxConfig);
+    //     rxConfig.FifoSize = 15;
+    //     rxConfig.PayLoadSize = CAN_PLSIZE_64;
+
+    //     DRV_CANFDSPI_ReceiveChannelConfigure(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &rxConfig);
+
+    //     // Setup RX Filter
+    //     fObj.word = 0;
+    //     fObj.bF.SID = 0xda;
+    //     fObj.bF.EXIDE = 0;
+    //     fObj.bF.EID = 0x00;
+
+    //     DRV_CANFDSPI_FilterObjectConfigure(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, &fObj.bF);
+
+    //     // Setup RX Mask
+    //     mObj.word = 0;
+    //     mObj.bF.MSID = 0x0;
+    //     mObj.bF.MIDE = 1; // Only allow standard IDs
+    //     mObj.bF.MEID = 0x0;
+
+    //     DRV_CANFDSPI_FilterMaskConfigure(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, &mObj.bF);
+
+    //     // Link FIFO and Filter
+    //     DRV_CANFDSPI_FilterToFifoLink(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, APP_RX_FIFO, true);
+
+    //     // Setup Bit Time
+    //     //		 DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_500K_5M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_20M);
+    //     // DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_500K_5M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_40M);
+    //     DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_1000K_8M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_40M);
+
+    //     // Setup Transmit and Receive Interrupts
+    //     DRV_CANFDSPI_GpioModeConfigure(DRV_CANFDSPI_INDEX_0, GPIO_MODE_INT, GPIO_MODE_INT);
+    // #ifdef APP_USE_TX_INT
+    //     DRV_CANFDSPI_TransmitChannelEventEnable(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, CAN_TX_FIFO_NOT_FULL_EVENT);
+    // #endif
+    //     DRV_CANFDSPI_ReceiveChannelEventEnable(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, CAN_RX_FIFO_NOT_EMPTY_EVENT);
+    //     DRV_CANFDSPI_ModuleEventEnable(DRV_CANFDSPI_INDEX_0, CAN_TX_EVENT | CAN_RX_EVENT);
+
+    //     // Select Normal Mode
+    //     DRV_CANFDSPI_OperationModeSelect(DRV_CANFDSPI_INDEX_0, MCP_CAN_NORMAL_MODE);
+    //     //	DRV_CANFDSPI_OperationModeSelect(DRV_CANFDSPI_INDEX_0, CAN_CLASSIC_MODE);
+    //     // Reset device
+    //     DRV_CANFDSPI_Reset(DRV_CANFDSPI_INDEX_0);
+    volatile bool a = false;
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    DRV_SPI_Initialize();
+    // Reset device
+    //DRV_CANFDSPI_Reset(DRV_CANFDSPI_INDEX_0);
+
+    while (1)
+    {
+        a = APP_TestRamAccess();
+        ESP_LOGI(TAG,"%d",a);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
 }
