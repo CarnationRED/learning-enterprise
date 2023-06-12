@@ -16,6 +16,7 @@
     "gpio.h": "c",
     "gpio_sig_map.h": "c",
     "io_mux_reg.h": "c",
-    "gpio_periph.h": "c"
+    "gpio_periph.h": "c",
+    "drv_canfdspi_api.h": "c"
   }
 }

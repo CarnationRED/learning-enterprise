@@ -33,6 +33,7 @@
 #include "ping/ping.h"
 #include "drv_spi.h"
 #include "drv_canfdspi_api.h"
+#include "i2c_oled_example_main.c"
 
 /* The examples use simple WiFi configuration that you can set via
    project configuration menu.
@@ -149,7 +150,8 @@ static void initialise_wifi(void)
     t1 = xTaskGetTickCount();
 }
 
-static TaskHandle_t hdle;
+static TaskHandle_t hdle1;
+static TaskHandle_t hdle2;
 static void wpa2_enterprise_example_task(void *pvParameters)
 {
     vTaskDelay(2000 / portTICK_PERIOD_MS);
@@ -190,19 +192,21 @@ static void wpa2_enterprise_example_task(void *pvParameters)
             {
                 printf("error:%d\n", res);
             }
-            vTaskDelete(hdle);
+            vTaskDelete(hdle1);
         }
     }
 }
-
+static void spitest();
 static void APP_CANFDSPI_Init(void *p);
 void app_main(void)
 {
     ts = xTaskGetTickCount();
     ESP_ERROR_CHECK(nvs_flash_init());
     initialise_wifi();
-    // xTaskCreate(&wpa2_enterprise_example_task, "wpa2_enterprise_example_task", 4096, NULL, 5, &hdle);
-    xTaskCreate(&APP_CANFDSPI_Init, "APP_CANFDSPI_Init", 4096, NULL, 5, &hdle);
+    // xTaskCreate(&wpa2_enterprise_example_task, "wpa2_enterprise_example_task", 4096, NULL, 5, &hdle1);
+    // xTaskCreate(&APP_CANFDSPI_Init, "APP_CANFDSPI_Init", 4096, NULL, 5, &hdle);
+    xTaskCreate(&spitest, "spitest", 4096, NULL, 5, &hdle2);
+    oled_main();
 }
 
 // Message IDs
@@ -223,7 +227,7 @@ static CAN_OPERATION_MODE opMode;
 // Transmit objects
 static CAN_TX_FIFO_CONFIG txConfig;
 static CAN_TX_FIFO_EVENT txFlags;
-static CAN_TX_MSGOBJ txObj;
+static CAN_TX_MSGOBJ txObj = {};
 static uint8_t txd[MAX_DATA_BYTES];
 uint8_t rxd[MAX_DATA_BYTES];
 
@@ -281,84 +285,102 @@ static bool APP_TestRamAccess(void)
 }
 static void APP_CANFDSPI_Init(void *p)
 {
-    //     DRV_SPI_Initialize();
-    //     // Reset device
-    //     DRV_CANFDSPI_Reset(DRV_CANFDSPI_INDEX_0);
-
-    //     // Enable ECC and initialize RAM
-    //     DRV_CANFDSPI_EccEnable(DRV_CANFDSPI_INDEX_0);
-
-    //     DRV_CANFDSPI_RamInit(DRV_CANFDSPI_INDEX_0, 0xff);
-
-    //     // Configure device
-    //     DRV_CANFDSPI_ConfigureObjectReset(&config);
-    //     config.IsoCrcEnable = 1;
-    //     config.StoreInTEF = 0;
-
-    //     DRV_CANFDSPI_Configure(DRV_CANFDSPI_INDEX_0, &config);
-
-    //     // Setup TX FIFO
-    //     DRV_CANFDSPI_TransmitChannelConfigureObjectReset(&txConfig);
-    //     txConfig.FifoSize = 7;
-    //     txConfig.PayLoadSize = CAN_PLSIZE_64;
-    //     txConfig.TxPriority = 1;
-
-    //     DRV_CANFDSPI_TransmitChannelConfigure(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &txConfig);
-
-    //     // Setup RX FIFO
-    //     DRV_CANFDSPI_ReceiveChannelConfigureObjectReset(&rxConfig);
-    //     rxConfig.FifoSize = 15;
-    //     rxConfig.PayLoadSize = CAN_PLSIZE_64;
-
-    //     DRV_CANFDSPI_ReceiveChannelConfigure(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &rxConfig);
-
-    //     // Setup RX Filter
-    //     fObj.word = 0;
-    //     fObj.bF.SID = 0xda;
-    //     fObj.bF.EXIDE = 0;
-    //     fObj.bF.EID = 0x00;
-
-    //     DRV_CANFDSPI_FilterObjectConfigure(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, &fObj.bF);
-
-    //     // Setup RX Mask
-    //     mObj.word = 0;
-    //     mObj.bF.MSID = 0x0;
-    //     mObj.bF.MIDE = 1; // Only allow standard IDs
-    //     mObj.bF.MEID = 0x0;
-
-    //     DRV_CANFDSPI_FilterMaskConfigure(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, &mObj.bF);
-
-    //     // Link FIFO and Filter
-    //     DRV_CANFDSPI_FilterToFifoLink(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, APP_RX_FIFO, true);
-
-    //     // Setup Bit Time
-    //     //		 DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_500K_5M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_20M);
-    //     // DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_500K_5M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_40M);
-    //     DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_1000K_8M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_40M);
-
-    //     // Setup Transmit and Receive Interrupts
-    //     DRV_CANFDSPI_GpioModeConfigure(DRV_CANFDSPI_INDEX_0, GPIO_MODE_INT, GPIO_MODE_INT);
-    // #ifdef APP_USE_TX_INT
-    //     DRV_CANFDSPI_TransmitChannelEventEnable(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, CAN_TX_FIFO_NOT_FULL_EVENT);
-    // #endif
-    //     DRV_CANFDSPI_ReceiveChannelEventEnable(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, CAN_RX_FIFO_NOT_EMPTY_EVENT);
-    //     DRV_CANFDSPI_ModuleEventEnable(DRV_CANFDSPI_INDEX_0, CAN_TX_EVENT | CAN_RX_EVENT);
-
-    //     // Select Normal Mode
-    //     DRV_CANFDSPI_OperationModeSelect(DRV_CANFDSPI_INDEX_0, MCP_CAN_NORMAL_MODE);
-    //     //	DRV_CANFDSPI_OperationModeSelect(DRV_CANFDSPI_INDEX_0, CAN_CLASSIC_MODE);
-    //     // Reset device
-    //     DRV_CANFDSPI_Reset(DRV_CANFDSPI_INDEX_0);
-    volatile bool a = false;
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    volatile uint8_t s = 0;
     DRV_SPI_Initialize();
     // Reset device
-    //DRV_CANFDSPI_Reset(DRV_CANFDSPI_INDEX_0);
+    s = DRV_CANFDSPI_Reset(DRV_CANFDSPI_INDEX_0);
 
+    // Enable ECC and initialize RAM
+    s = DRV_CANFDSPI_EccEnable(DRV_CANFDSPI_INDEX_0);
+
+    s = DRV_CANFDSPI_RamInit(DRV_CANFDSPI_INDEX_0, 0xff);
+
+    // Configure device
+    s = DRV_CANFDSPI_ConfigureObjectReset(&config);
+    config.IsoCrcEnable = 1;
+    config.StoreInTEF = 0;
+
+    s = DRV_CANFDSPI_Configure(DRV_CANFDSPI_INDEX_0, &config);
+
+    // Setup TX FIFO
+    s = DRV_CANFDSPI_TransmitChannelConfigureObjectReset(&txConfig);
+    txConfig.FifoSize = 7;
+    txConfig.PayLoadSize = CAN_PLSIZE_64;
+    txConfig.TxPriority = 1;
+
+    s = DRV_CANFDSPI_TransmitChannelConfigure(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &txConfig);
+
+    // Setup RX FIFO
+    s = DRV_CANFDSPI_ReceiveChannelConfigureObjectReset(&rxConfig);
+    rxConfig.FifoSize = 15;
+    rxConfig.PayLoadSize = CAN_PLSIZE_64;
+
+    s = DRV_CANFDSPI_ReceiveChannelConfigure(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &rxConfig);
+
+    // Setup RX Filter
+    fObj.word = 0;
+    fObj.bF.SID = 0xda;
+    fObj.bF.EXIDE = 0;
+    fObj.bF.EID = 0x00;
+
+    s = DRV_CANFDSPI_FilterObjectConfigure(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, &fObj.bF);
+
+    // Setup RX Mask
+    mObj.word = 0;
+    mObj.bF.MSID = 0x0;
+    mObj.bF.MIDE = 1; // Only allow standard IDs
+    mObj.bF.MEID = 0x0;
+
+    s = DRV_CANFDSPI_FilterMaskConfigure(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, &mObj.bF);
+
+    // Link FIFO and Filter
+    s = DRV_CANFDSPI_FilterToFifoLink(DRV_CANFDSPI_INDEX_0, CAN_FILTER0, APP_RX_FIFO, true);
+
+    // Setup Bit Time
+    // DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_500K_5M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_20M);
+    // DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_500K_5M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_40M);
+    s = DRV_CANFDSPI_BitTimeConfigure(DRV_CANFDSPI_INDEX_0, CAN_500K_5M, CAN_SSP_MODE_AUTO, CAN_SYSCLK_40M);
+
+    // Setup Transmit and Receive Interrupts
+    s = DRV_CANFDSPI_GpioModeConfigure(DRV_CANFDSPI_INDEX_0, GPIO_MODE_INT, GPIO_MODE_INT);
+#ifdef APP_USE_TX_INT
+    s = DRV_CANFDSPI_TransmitChannelEventEnable(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, CAN_TX_FIFO_NOT_FULL_EVENT);
+#endif
+    s = DRV_CANFDSPI_ReceiveChannelEventEnable(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, CAN_RX_FIFO_NOT_EMPTY_EVENT);
+    s = DRV_CANFDSPI_ModuleEventEnable(DRV_CANFDSPI_INDEX_0, CAN_TX_EVENT | CAN_RX_EVENT);
+
+    // Select Normal Mode
+    s = DRV_CANFDSPI_OperationModeSelect(DRV_CANFDSPI_INDEX_0, CAN_CLASSIC_MODE);
+    //	DRV_CANFDSPI_OperationModeSelect(DRV_CANFDSPI_INDEX_0, CAN_CLASSIC_MODE);
+    // Reset device
+    // s = DRV_CANFDSPI_Reset(DRV_CANFDSPI_INDEX_0);
+}
+void spitest()
+{
+    volatile bool a = false;
+    APP_CANFDSPI_Init(NULL);
+    long b=0;
     while (1)
     {
-        a = APP_TestRamAccess();
-        ESP_LOGI(TAG,"%d",a);
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(100));
+        // Configure transmit message
+        txObj.word[0] = 0;
+        txObj.word[1] = 0;
+
+        txObj.bF.id.SID = TX_RESPONSE_ID;
+        txObj.bF.id.EID = 0;
+
+        txObj.bF.ctrl.BRS = 0;
+        txObj.bF.ctrl.DLC = CAN_DLC_8;
+        txObj.bF.ctrl.FDF = 0;
+        txObj.bF.ctrl.IDE = 0;
+
+        // Configure message data
+        for (uint8_t i = 0; i < 8; i++)
+            txd[i] = txObj.bF.id.SID + i;
+
+        // a = APP_TestRamAccess();
+        // ESP_LOGI(TAG,"%d",a);
+        ESP_LOGI(TAG, "%d", DRV_CANFDSPI_TransmitChannelLoad(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &txObj, txd, DRV_CANFDSPI_DlcToDataBytes(txObj.bF.ctrl.DLC), (b++ %7)==0));
     }
 }

@@ -60,10 +60,10 @@ DIRECTLY TO MICROCHIP FOR THIS SOFTWARE.
 // Section: Variables
 
 //! SPI Transmit buffer
-uint8_t spiTransmitBuffer[SPI_DEFAULT_BUFFER_LENGTH];
+__attribute__((aligned(4))) uint8_t spiTransmitBuffer[SPI_DEFAULT_BUFFER_LENGTH];
 
 //! SPI Receive buffer
-uint8_t spiReceiveBuffer[SPI_DEFAULT_BUFFER_LENGTH];
+__attribute__((aligned(4))) uint8_t spiReceiveBuffer[SPI_DEFAULT_BUFFER_LENGTH];
 
 //! Reverse order of bits in byte
 const uint8_t BitReverseTable256[256] = {
@@ -714,7 +714,7 @@ int8_t DRV_CANFDSPI_TransmitChannelConfigure(CANFDSPI_MODULE_ID index,
     uint16_t a = 0;
 
     // Setup FIFO
-    REG_CiFIFOCON ciFifoCon;
+ volatile   REG_CiFIFOCON ciFifoCon;
     ciFifoCon.word = canFifoResetValues[0];
     ciFifoCon.txBF.TxEnable = 1;
     ciFifoCon.txBF.FifoSize = config->FifoSize;
@@ -786,8 +786,8 @@ int8_t DRV_CANFDSPI_TransmitChannelLoad(CANFDSPI_MODULE_ID index,
     uint16_t a;
     uint32_t fifoReg[3];
     uint32_t dataBytesInObject;
-    REG_CiFIFOCON ciFifoCon;
-    REG_CiFIFOSTA ciFifoSta;
+   volatile REG_CiFIFOCON ciFifoCon;
+   volatile REG_CiFIFOSTA ciFifoSta;
     REG_CiFIFOUA ciFifoUa;
     int8_t spiTransferError = 0;
 
