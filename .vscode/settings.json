@@ -17,6 +17,27 @@
     "gpio_sig_map.h": "c",
     "io_mux_reg.h": "c",
     "gpio_periph.h": "c",
-    "drv_canfdspi_api.h": "c"
+    "drv_canfdspi_api.h": "c",
+    "esp_timer.h": "c",
+    "esp_lcd_panel_io.h": "c",
+    "i2c.h": "c",
+    "u8g2.h": "c",
+    "esp_system.h": "c",
+    "esp_wpa2.h": "c",
+    "esp_wifi.h": "c",
+    "esp_event.h": "c",
+    "nvs_flash.h": "c",
+    "esp_netif.h": "c",
+    "esp_ping.h": "c",
+    "esp_log.h": "c",
+    "freertos.h": "c",
+    "stdlib.h": "c",
+    "oled.h": "c",
+    "task.h": "c",
+    "ping.h": "c",
+    "wifi.h": "c",
+    "random": "c",
+    "condition_variable": "c",
+    "future": "c"
   }
 }

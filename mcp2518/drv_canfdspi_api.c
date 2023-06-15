@@ -2669,22 +2669,22 @@ int8_t DRV_CANFDSPI_TimeStampDisable(CANFDSPI_MODULE_ID index)
     return spiTransferError;
 }
 
-int8_t DRV_CANFDSPI_TimeStampGet(CANFDSPI_MODULE_ID index, uint32_t* ts)
+int8_t DRV_CANFDSPI_TimeStampGet(CANFDSPI_MODULE_ID index, uint32_t* t_sysInit)
 {
     int8_t spiTransferError = 0;
 
     // Read
-    spiTransferError = DRV_CANFDSPI_ReadWord(index, cREGADDR_CiTBC, ts);
+    spiTransferError = DRV_CANFDSPI_ReadWord(index, cREGADDR_CiTBC, t_sysInit);
 
     return spiTransferError;
 }
 
-int8_t DRV_CANFDSPI_TimeStampSet(CANFDSPI_MODULE_ID index, uint32_t ts)
+int8_t DRV_CANFDSPI_TimeStampSet(CANFDSPI_MODULE_ID index, uint32_t t_sysInit)
 {
     int8_t spiTransferError = 0;
 
     // Write
-    spiTransferError = DRV_CANFDSPI_WriteWord(index, cREGADDR_CiTBC, ts);
+    spiTransferError = DRV_CANFDSPI_WriteWord(index, cREGADDR_CiTBC, t_sysInit);
 
     return spiTransferError;
 }

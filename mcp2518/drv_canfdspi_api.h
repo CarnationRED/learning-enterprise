@@ -946,12 +946,12 @@ int8_t DRV_CANFDSPI_TimeStampDisable(CANFDSPI_MODULE_ID index);
 // *****************************************************************************
 //! Time Stamp Get
 
-int8_t DRV_CANFDSPI_TimeStampGet(CANFDSPI_MODULE_ID index, uint32_t* ts);
+int8_t DRV_CANFDSPI_TimeStampGet(CANFDSPI_MODULE_ID index, uint32_t* t_sysInit);
 
 // *****************************************************************************
 //! Time Stamp Set
 
-int8_t DRV_CANFDSPI_TimeStampSet(CANFDSPI_MODULE_ID index, uint32_t ts);
+int8_t DRV_CANFDSPI_TimeStampSet(CANFDSPI_MODULE_ID index, uint32_t t_sysInit);
 
 // *****************************************************************************
 //! Time Stamp Mode Configure
