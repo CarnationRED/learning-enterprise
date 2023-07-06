@@ -1,7 +1,13 @@
+#ifndef __CAN_C__
+#define __CAN_C__
+
+#include "stdbool.h"
+#include <stdio.h>
+#include "msg.h"
+#include "wifi.h"
 #include "can.h"
 #include "drv_spi.h"
 #include "drv_canfdspi_api.h"
-#include <stdio.h>
 #include "u8g2.h"
 #include "oled.h"
 #include "esp_log.h"
@@ -10,6 +16,30 @@
 #include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "driver/i2c.h"
+#include "driver/gpio.h"
+#include "esp_system.h"
+
+CAN_STATS canStats = CAN_STAT_INIT;
+
+// Interrupts
+#define INT_IN 8
+#define INT_TX_IN 17
+#define INT_RX_IN 18
+
+#define APP_INT() (!gpio_get_level(INT_IN))
+#define APP_TX_INT() (!gpio_get_level(INT_TX_IN)) // 1：TXQ not full
+#define APP_RX_INT() (!gpio_get_level(INT_RX_IN)) // 1：RX FIFO not empty
+
+#define CH444G_SW0 36
+#define CH444G_SW1 35
+#define CH444G_SWEN 45
+#define SWENABLE() gpio_set_level(CH444G_SWEN, 0)
+#define SWDISABLE() gpio_set_level(CH444G_SWEN, 1)
+#define SW0_0() gpio_set_level(CH444G_SW0, 0)
+#define SW1_0() gpio_set_level(CH444G_SW1, 0)
+#define SW0_1() gpio_set_level(CH444G_SW0, 1)
+#define SW1_1() gpio_set_level(CH444G_SW1, 1)
+u8 canCurrentChannel = 0;
 
 // Message IDs
 #define TX_REQUEST_ID 0x300
@@ -20,6 +50,7 @@
 
 // Transmit Channels
 #define APP_TX_FIFO CAN_FIFO_CH2
+#define APP_USE_TX_INT 1
 
 // Receive Channels
 #define APP_RX_FIFO CAN_FIFO_CH1
@@ -31,7 +62,6 @@ static CAN_TX_FIFO_CONFIG txConfig;
 static CAN_TX_FIFO_EVENT txFlags;
 static CAN_TX_MSGOBJ txObj = {};
 static uint8_t txd[MAX_DATA_BYTES];
-uint8_t rxd[MAX_DATA_BYTES];
 
 // Receive objects
 static CAN_RX_FIFO_CONFIG rxConfig;
@@ -39,13 +69,19 @@ static REG_CiFLTOBJ fObj;
 static REG_CiMASK mObj;
 static CAN_RX_FIFO_EVENT rxFlags;
 static CAN_RX_MSGOBJ rxObj;
+
+int rxMsgFifo = 0;
+static CAN_MSG_FRAME msg={};
+
+extern void (*spican_rx_int_ptr)(void *para);
+
 static bool APP_TestRamAccess(void)
 {
     // Variables
     uint16_t i = 0;
     uint8_t length;
     bool good = false;
-
+    u8 rxd[64];
     Nop();
 
     // Verify read/write with different access length
@@ -84,6 +120,44 @@ static bool APP_TestRamAccess(void)
     }
 
     return true;
+}
+
+void canChannelInit()
+{
+    gpio_pad_select_gpio(CH444G_SW0);
+    gpio_pad_select_gpio(CH444G_SW1);
+    gpio_pad_select_gpio(CH444G_SWEN);
+}
+void can_rx_int_handler(void *para)
+{
+    if (!APP_RX_INT())
+        return;
+    if (0 != DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &rxObj, msg.data, MAX_DATA_BYTES))
+    {
+        canStats = CAN_STAT_RXERROR;
+    }
+    msg.rxObj = rxObj;
+    msg.channel = (u8)para;
+    if (!fifo_write(rxMsgFifo, &msg))
+    {
+        if (!fifo_writeable(rxMsgFifo))
+            canStats = CAN_STAT_RXQERROR;
+        else if (!fifo_writeable_item_count(rxMsgFifo))
+            canStats = CAN_STAT_RXQFULL;
+    }
+    else
+    {
+        BaseType_t xHigherPriorityTaskWoken;
+        xHigherPriorityTaskWoken = pdFALSE;
+        vTaskNotifyGiveFromISR(taskDataUp, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+}
+void canInit()
+{
+    canChannelInit();
+    spican_rx_int_ptr = &can_rx_int_handler;
+    rxMsgFifo = fifo_create(100, sizeof(CAN_MSG_FRAME));
 }
 void APP_CANFDSPI_Init(void *p)
 {
@@ -193,3 +267,82 @@ void spitest()
         ESP_LOGI("CAN", "%d", DRV_CANFDSPI_TransmitChannelLoad(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &txObj, txd, DRV_CANFDSPI_DlcToDataBytes(txObj.bF.ctrl.DLC), (b++ % 7) == 0));
     }
 }
+bool _canWaitTxFifoEmpty()
+{
+    CAN_TX_FIFO_STATUS stat;
+    for (u8 i = 0; i < 10; i++)
+    {
+        if (0 != DRV_CANFDSPI_TransmitQueueStatusGet(DRV_CANFDSPI_INDEX_0, &stat))
+            return false;
+        if (stat == CAN_TX_FIFO_EMPTY)
+            return true;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return false;
+}
+bool canSwitchChannel(u8 channel)
+{
+    // SW0		SW1		CAN			CHANNEL	        CAN_CHIPSELECT
+    // 0		0		6/14		0				DRV_CANFDSPI_INDEX_0
+    // 1		0		11/12		1				DRV_CANFDSPI_INDEX_0
+    // 0		1		3/8			2				DRV_CANFDSPI_INDEX_0
+    // 1		1		2/10		3				DRV_CANFDSPI_INDEX_0
+    if (!(channel >= 0 && channel <= 4))
+        return false;
+    u8 b = channel != canCurrentChannel;
+    if (b)
+    {
+        switch (channel)
+        {
+        case 0:
+            _canWaitTxFifoEmpty();
+            SW0_0();
+            SW1_0();
+            break;
+        case 1:
+            _canWaitTxFifoEmpty();
+            SW0_1();
+            SW1_0();
+        case 2:
+            _canWaitTxFifoEmpty();
+            SW0_0();
+            SW1_1();
+            break;
+        case 3:
+            _canWaitTxFifoEmpty();
+            SW0_1();
+            SW1_1();
+            break;
+        default:
+            return false;
+        }
+        canCurrentChannel = channel;
+    }
+    return true;
+}
+ bool canSendOneFrame(CAN_CMD_FRAME * msg)
+{
+    if (canSwitchChannel(msg->channel)) // switch to correct channel
+    {
+        u8 retry = 0;
+        while (!APP_TX_INT()) // wait txq not full, timeout 10*50ms = 500ms
+        {
+            if (retry++ == 10)
+            {
+                canStats = CAN_STAT_TXQFULL;
+                return false;
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        if (DRV_CANFDSPI_TransmitChannelLoad(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &(msg->txObj), msg->data, DRV_CANFDSPI_DlcToDataBytes(msg->txObj.bF.ctrl.DLC), true) != 0)
+        {
+            canStats = CAN_STAT_TXERROR;
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+
+#endif // !__CAN_C__

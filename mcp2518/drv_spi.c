@@ -51,52 +51,87 @@ OF SUCH DAMAGE.
 #include "soc/io_mux_reg.h"
 #include "drv_spi.h"
 #include "hal/gpio_hal.h"
+#include "../main/include/can.h"
 
 #define PIN_NUM_MISO 11
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK 12
 #define PIN_NUM_CS 10
 
-#define SPI_FALSH_CS_PORT GPIOA
-#define SPI_FALSH_CS_PIN GPIO_PIN_4
+// Interrupts
+#define INT_IN 8
+#define INT_TX_IN 17
+#define INT_RX_IN 18
+#define ESP_INTR_FLAG_DEFAULT 0//定义默认的中断标志为0
 
 #define SPI_FLASH_CS_LOW() gpio_set_level(PIN_NUM_CS, 0)
 #define SPI_FLASH_CS_HIGH() gpio_set_level(PIN_NUM_CS, 1)
 
 static spi_device_handle_t spi;
+// static QueueHandle_t gpio_evt_queue = NULL;
+void (*spican_rx_int_ptr)(void *para) = NULL;
+
 /* Local function prototypes */
 inline void spi_master_init(void);
 inline int8_t spi_master_transfer(uint8_t *SpiTxData, uint8_t *SpiRxData, uint16_t spiTransferSize);
+// static void task_spi_rx_int(void *arg)
+// {
+//   uint32_t param;
+//   for (;;)
+//   {
+//     if (xQueueReceive(gpio_evt_queue, &param, portMAX_DELAY))
+//     {
+//       int io_num = param & 0x00FFFFFF;
+//       printf("GPIO[%" PRIu32 "] intr, val: %d\n", io_num, gpio_get_level(io_num));
+//       if (spican_rx_int_ptr != NULL)
+//         (*spican_rx_int_ptr)((void *)(param >> 24));
+//     }
+//   }
+// }
+static void IRAM_ATTR gpio_isr_handler(void *arg)
+{
+  uint32_t gpio_num = (uint32_t)arg;
+  gpio_num |= canCurrentChannel << 24;
+  // xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+
+  int io_num = gpio_num & 0x00FFFFFF;
+  printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
+  if (spican_rx_int_ptr != NULL)
+    (*spican_rx_int_ptr)((void *)(canCurrentChannel));
+}
 
 void DRV_SPI_Initialize(void)
 {
   spi_master_init();
+  /**
+   * 定义并配置GPIO口
+   */
+  gpio_config_t io_conf;
+  io_conf.intr_type = GPIO_INTR_NEGEDGE; // 下降沿中断
+  io_conf.mode = GPIO_MODE_INPUT;        // 输入模式
+  io_conf.pin_bit_mask = INT_RX_IN;      // 配置要设置的引脚
+  io_conf.pull_down_en = 0;              // 禁止下拉
+  io_conf.pull_up_en = 0;                // 引脚电平上拉
+  // 配置gpio
+  gpio_config(&io_conf);
+
+  // change gpio interrupt type for one pin
+  gpio_set_intr_type(INT_RX_IN, GPIO_INTR_NEGEDGE);
+
+  // create a queue to handle gpio event from isr
+  // gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+  // start gpio task
+  // xTaskCreate(task_spi_rx_int, "task_spi_rx_int", 2048, NULL, 10, NULL);
+
+  // install gpio isr service
+  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  // hook isr handler for specific gpio pin
+  gpio_isr_handler_add(INT_RX_IN, gpio_isr_handler, (void *)INT_RX_IN);
 }
 
 int8_t DRV_SPI_TransferData(uint8_t spiSlaveDeviceIndex, uint8_t *SpiTxData, uint8_t *SpiRxData, uint16_t spiTransferSize)
 {
   return spi_master_transfer(SpiTxData, SpiRxData, spiTransferSize);
-}
-static void gpio_matrix_out_check_and_set(gpio_num_t gpio, uint32_t signal_idx, bool out_inv, bool oen_inv)
-{
-  // if pin = -1, do not need to configure
-  if (gpio != -1)
-  {
-    gpio_hal_iomux_func_sel(GPIO_PIN_MUX_REG[gpio], PIN_FUNC_GPIO);
-    gpio_set_direction(gpio, GPIO_MODE_OUTPUT);
-    esp_rom_gpio_connect_out_signal(gpio, signal_idx, out_inv, oen_inv);
-  }
-}
-
-static void gpio_matrix_in_check_and_set(gpio_num_t gpio, uint32_t signal_idx, bool inv)
-{
-  if (gpio != -1)
-  {
-    gpio_hal_iomux_func_sel(GPIO_PIN_MUX_REG[gpio], PIN_FUNC_GPIO);
-    /* Set direction, for some GPIOs, the input function are not enabled as default */
-    gpio_set_direction(gpio, GPIO_MODE_INPUT);
-    esp_rom_gpio_connect_in_signal(gpio, signal_idx, inv);
-  }
 }
 void spi_master_init(void)
 {
@@ -110,7 +145,7 @@ void spi_master_init(void)
   spi_device_interface_config_t devcfg = {
       .clock_speed_hz = 10 * 1000 * 1000, // Clock out at 20 MHz
       .mode = 0,                          // SPI mode 0
-      .spics_io_num = PIN_NUM_CS,                  // CS pin
+      .spics_io_num = PIN_NUM_CS,         // CS pin
       .cs_ena_pretrans = 1,
       .cs_ena_posttrans = 1,
       .queue_size = 40,

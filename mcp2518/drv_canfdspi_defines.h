@@ -393,10 +393,10 @@ typedef union _CAN_TEF_MSGOBJ {
 //! CAN Filter Object ID
 
 typedef struct _CAN_FILTEROBJ_ID {
-    uint32_t SID : 11;
-    uint32_t EID : 18;
-    uint32_t SID11 : 1;
-    uint32_t EXIDE : 1;
+    uint32_t SID : 11;//ID
+    uint32_t EID : 18;//extend ID, or data bytes to filter
+    uint32_t SID11 : 1;//excess 1 bit id in FD mode
+    uint32_t EXIDE : 1;//extend ID or standard ID
     uint32_t unimplemented1 : 1;
 } CAN_FILTEROBJ_ID;
 

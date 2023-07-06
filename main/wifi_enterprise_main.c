@@ -36,6 +36,7 @@
 #include "u8g2_wqy.h"
 #include "can.h"
 #include "wifi.h"
+#include "task.h"
 
 /* The examples use simple WiFi configuration that you can set via
    project configuration menu.
@@ -50,6 +51,7 @@
 typedef int32_t s32;
 typedef int16_t s16;
 
+TaskHandle_t hdle0;
 TaskHandle_t hdle1;
 TaskHandle_t hdle2;
 TaskHandle_t hdle3;
@@ -71,22 +73,14 @@ static esp_netif_t *sta_netif = NULL;
    to the AP with an IP? */
 const int CONNECTED_BIT = BIT0;
 
-static esp_err_t pingResults(ping_target_id_t msgType, esp_ping_found *pf)
-{
-    // printf("AvgTime:%.1fmS Sent:%ld Rec:%ld min(mS):%ld max(mS):%ld Resp(mS):%ld Timeouts:%ld Total Time:%ld\n", (float)pf->total_time / pf->recv_count, pf->send_count, pf->recv_count, pf->min_time, pf->max_time, pf->resp_time, pf->timeout_count, pf->total_time);
-    wifiStats = WIFI_STAT_SVRFOUND;
-    ping_deinit();
-    return ESP_OK;
-}
-static void checkPing(uint32_t timeout)
-{
-    uint32_t t=0;
+// static esp_err_t pingResults(ping_target_id_t msgType, esp_ping_found *pf)
+// {
+//     // printf("AvgTime:%.1fmS Sent:%ld Rec:%ld min(mS):%ld max(mS):%ld Resp(mS):%ld Timeouts:%ld Total Time:%ld\n", (float)pf->total_time / pf->recv_count, pf->send_count, pf->recv_count, pf->min_time, pf->max_time, pf->resp_time, pf->timeout_count, pf->total_time);
+//     wifiStats = WIFI_STAT_SVRFOUND;
+//     ping_deinit();
+//     return ESP_OK;
+// }
 
-    while(t<timeout)
-   { vTaskDelay(pdMS_TO_TICKS(timeout));
-   if(wifiStats!=s)
-   }
-}
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
@@ -103,52 +97,53 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
     {
-        wifiStats = WIFI_STAT_APCNTED;
         xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
         t_ApCnted = xTaskGetTickCount();
         esp_netif_ip_info_t ip;
         memset(&ip, 0, sizeof(esp_netif_ip_info_t));
         if (esp_netif_get_ip_info(sta_netif, &ip) == 0 && (xEventGroupGetBits(wifi_event_group) & CONNECTED_BIT) != 0)
         {
-            printf("~~~~~~~~~~~");
+            wifiStats = WIFI_STAT_APCNTED;
             sprintf(thisIp, IPSTR, IP2STR(&ip.ip));
-            printf("IP:%s\n", thisIp);
             sprintf(thisMask, IPSTR, IP2STR(&ip.netmask));
             sprintf(thisGw, IPSTR, IP2STR(&ip.gw));
-            // printf("Startup: sys(%ldms) app(%ldms)", t_sysInit * 10, (t_staInit - t_sysInit) * 10);
-            printf("Time: config(%ldms), connect(%ldms), total(%ldms)\n", pdTICKS_TO_MS(t_staConfig - t_staInit), (t_ApCnted - t_staConfig) * 10, (t_ApCnted - t_staInit) * 10);
-            printf("~~~~~~~~~~~");
-            const char *ip = "10.5.189.99";
+            /* printf("~~~~~~~~~~~");
+             printf("IP:%s\n", thisIp);
+             // printf("Startup: sys(%ldms) app(%ldms)", t_sysInit * 10, (t_staInit - t_sysInit) * 10);
+             printf("Time: config(%ldms), connect(%ldms), total(%ldms)\n", pdTICKS_TO_MS(t_staConfig - t_staInit), (t_ApCnted - t_staConfig) * 10, (t_ApCnted - t_staInit) * 10);
+             printf("~~~~~~~~~~~");
+             const char *ip = "10.5.189.99";
 
-            ping_deinit();
-            uint32_t ping_count = 4;
-            uint32_t ping_timeout = 500;
-            uint32_t ping_delay = 500;
-            esp_ping_set_target(PING_TARGET_IP_ADDRESS_COUNT, &ping_count, sizeof(uint32_t));
-            esp_ping_set_target(PING_TARGET_RCV_TIMEO, &ping_timeout, sizeof(uint32_t));
-            esp_ping_set_target(PING_TARGET_DELAY_TIME, &ping_delay, sizeof(uint32_t));
-            esp_ping_set_target(PING_TARGET_IP_ADDRESS, ip, sizeof(uint32_t));
-            esp_ping_set_target(PING_TARGET_RES_FN, &pingResults, sizeof(pingResults));
-            uint8_t res = 0;
-            res = ping_init();
-            if (res == 0)
-            {
-                printf("PING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-                ping_timeout += ping_delay;
-                ping_timeout *= ping_count;
-                xTaskCreate(&checkPing, "checkPing", 1024, &ping_timeout, 6, NULL);
-            }
-            else
-            {
-                printf("error:%d\n", res);
-                wifiStats = WIFI_STAT_ERRORPING;
-            }
+             ping_deinit();
+             uint32_t ping_count = 4;
+             uint32_t ping_timeout = 500;
+             uint32_t ping_delay = 500;
+             esp_ping_set_target(PING_TARGET_IP_ADDRESS_COUNT, &ping_count, sizeof(uint32_t));
+             esp_ping_set_target(PING_TARGET_RCV_TIMEO, &ping_timeout, sizeof(uint32_t));
+             esp_ping_set_target(PING_TARGET_DELAY_TIME, &ping_delay, sizeof(uint32_t));
+             esp_ping_set_target(PING_TARGET_IP_ADDRESS, ip, sizeof(uint32_t));
+             esp_ping_set_target(PING_TARGET_RES_FN, &pingResults, sizeof(pingResults));
+             uint8_t res = 0;
+             res = ping_init();
+             if (res == 0)
+             {
+                 printf("PING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+                 ping_timeout += ping_delay;
+                 ping_timeout *= ping_count;
+                 xTaskCreate(&checkPing, "checkPing", 1024, &ping_timeout, 6, NULL);
+             }
+             else
+             {
+                 printf("error:%d\n", res);
+                 wifiStats = WIFI_STAT_ERRORPING;
+             }*/
         }
     }
 }
 void initialise_wifi(void)
 {
     t_staInit = xTaskGetTickCount();
+    wifiStats = WIFI_STAT_INIT;
     ESP_ERROR_CHECK(esp_netif_init());
     wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -175,10 +170,12 @@ void initialise_wifi(void)
     ESP_ERROR_CHECK(esp_wifi_start());
     t_staConfig = xTaskGetTickCount();
     vTaskDelay(2000);
-    vTaskDelete(hdle1);
+    vTaskDelete(NULL);
+    vTaskDelay(2000);
 }
 
 extern void spitest();
+extern void task_mechine();
 void led();
 void app_main(void)
 {
@@ -187,9 +184,10 @@ void app_main(void)
     // initialise_wifi();
     //  xTaskCreate(&wpa2_enterprise_example_task, "wpa2_enterprise_example_task", 4096, NULL, 5, &hdle1);
     //  xTaskCreate(&APP_CANFDSPI_Init, "APP_CANFDSPI_Init", 4096, NULL, 5, &hdle);
-    xTaskCreate(&initialise_wifi, "init_wifi", 4096, NULL, 4, &hdle1);
-    xTaskCreate(&spitest, "spitest", 4096, NULL, 5, &hdle2);
-    xTaskCreate(&led, "led", 4096, NULL, 6, &hdle3);
+    xTaskCreate(&initialise_wifi, "init_wifi", 4096, NULL, 4, &hdle0);
+    xTaskCreate(&task_mechine, "wifi_task", 4096, NULL, 3, &hdle1);
+    //xTaskCreate(&spitest, "spitest", 4096, NULL, 5, &hdle2);
+    //xTaskCreate(&led, "led", 4096, NULL, 6, &hdle3);
 }
 void led()
 {
