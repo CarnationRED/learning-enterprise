@@ -6,7 +6,7 @@
 
 void spitest();
 void APP_CANFDSPI_Init(void *p);
-bool canSendOneFrame(CAN_CMD_FRAME * msg);
+static bool canSendOneFrame(CAN_CMD_FRAME * msg);
 
 typedef enum
 {

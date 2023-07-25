@@ -1,11 +1,11 @@
 {
   "C_Cpp.intelliSenseEngine": "Tag Parser",
   "idf.adapterTargetName": "esp32s3",
-  "idf.portWin": "COM8",
+  "idf.portWin": "COM7",
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.flashType": "UART",
+  "idf.flashType": "JTAG",
   "files.associations": {
     "drv_spi.h": "c",
     "string_view": "c",
@@ -48,6 +48,7 @@
     "gpio_hal.h": "c",
     "string.h": "c",
     "esp_rom_gpio.h": "c",
-    "esp_intr_alloc.h": "c"
+    "esp_intr_alloc.h": "c",
+    "xutility": "c"
   }
 }

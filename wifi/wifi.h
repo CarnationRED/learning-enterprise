@@ -4,7 +4,6 @@
 #include "stdint.h"
 #include "stdbool.h"
 #include "msg.h"
-#include "can.h"
 #define WIFI_SSID "DFM-PV"
 #define WIFI_IDENTITY "dfpv.com.cn"
 #define WIFI_USR "oa-pda-mas"
@@ -33,6 +32,7 @@ typedef enum
 
 int pingServer(void);
 void connectServer(void);
+void disconnectServer(void);
 
 // extern bool canSendOneFrame(CAN_CMD_FRAME * msg);
 void taskDataDown();

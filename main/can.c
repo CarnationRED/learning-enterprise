@@ -74,6 +74,7 @@ int rxMsgFifo = 0;
 static CAN_MSG_FRAME msg={};
 
 extern void (*spican_rx_int_ptr)(void *para);
+extern bool (*canSendPtr )(CAN_CMD_FRAME * msg);
 
 static bool APP_TestRamAccess(void)
 {
@@ -157,6 +158,7 @@ void canInit()
 {
     canChannelInit();
     spican_rx_int_ptr = &can_rx_int_handler;
+    canSendPtr=canSendOneFrame;
     rxMsgFifo = fifo_create(100, sizeof(CAN_MSG_FRAME));
 }
 void APP_CANFDSPI_Init(void *p)
@@ -320,7 +322,7 @@ bool canSwitchChannel(u8 channel)
     }
     return true;
 }
- bool canSendOneFrame(CAN_CMD_FRAME * msg)
+static bool canSendOneFrame(CAN_CMD_FRAME * msg)
 {
     if (canSwitchChannel(msg->channel)) // switch to correct channel
     {
