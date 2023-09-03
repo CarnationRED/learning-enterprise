@@ -6,10 +6,10 @@
       "type": "cppdbg",
       "request": "launch",
       "MIMode": "gdb",
-      "miDebuggerPath": "C:/Users/Avent/.espressif/tools/xtensa-esp32s3-elf/esp-2022r1-11.2.0/xtensa-esp32s3-elf/bin/xtensa-esp32s3-elf-gdb.exe",
+      "miDebuggerPath": "C:/Users/AGT3/.espressif/tools/xtensa-esp32s3-elf/esp-2022r1-11.2.0/xtensa-esp32s3-elf/bin/xtensa-esp32s3-elf-gdb.exe",
       "program": "${workspaceFolder}/build/${command:espIdf.getProjectName}.elf",
       "windows": {
-        "program": "${workspaceFolder}\\build\\${command:espIdf.getProjectName}.elf"
+        "program": "${workspaceFolder}//build//${command:espIdf.getProjectName}.elf"
       },
       "cwd": "${workspaceFolder}",
       "environment": [{ "name": "PATH", "value": "${config:idf.customExtraPaths}" }],

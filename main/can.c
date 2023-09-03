@@ -77,6 +77,7 @@ static TaskHandle_t txHandle, rxHandle, wifiHandle;
 int rxMsgFifo = 0;
 int txMsgFifo = 0;
 static CAN_MSG_FRAME msg = {};
+uint8_t canSendWifiTxBuffer[16384];
 
 extern void (*spican_rx_int_ptr)(void *para);
 extern bool (*canSendPtr)(CAN_CMD_FRAME *msg);
@@ -179,10 +180,11 @@ static void task_canrx()
 {
     u8 result;
     u8 count = 0;
+    u8 tick;
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
+        count = 0;
         while (APP_RX_INT())
         {
             result = DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &msg.rxObj, msg.data, MAX_DATA_BYTES);
@@ -195,6 +197,7 @@ static void task_canrx()
             }
             else
             {
+                tick = xTaskGetTickCount();
                 if (!fifo_write(rxMsgFifo, (void *)&msg))
                 {
                     sprintf(canErrStr, "can recv fifo full, discard");
@@ -202,16 +205,18 @@ static void task_canrx()
                     continue;
                 }
                 count++;
-                sprintf(canErrStr, "0x%X: %02X %02X %02X %02X %02X %02X %02X %02X", msg.rxObj.bF.id.SID, msg.data[0], msg.data[1], msg.data[2], msg.data[3], msg.data[4], msg.data[5], msg.data[6], msg.data[7]);
-                ESP_LOGI("canrx","%s", canErrStr);
+                // sprintf(canErrStr, "0x%X", msg.rxObj.bF.id.SID);
+                // tick = xTaskGetTickCount() - tick;
+                // ESP_LOGI("canrx", "count: %d\ttick:%d\t%s", count, tick, canErrStr);
             }
-            if (count == 10)
+            if (count == 32)
             {
                 count = 0;
                 xTaskNotifyGive(wifiHandle);
             }
         }
-        vTaskDelay(1);
+        xTaskNotifyGive(wifiHandle);
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 static void task_cantx()
@@ -232,40 +237,38 @@ static void task_cantx()
         vTaskDelay(1);
     }
 }
+static void sendone(int count)
+{
+    fifo_read_batch(rxMsgFifo, canSendWifiTxBuffer, count);
+    // txb[count * sizeof(CAN_MSG_FRAME)] = '\0';
+    canSend2Wifi(canSendWifiTxBuffer, count * sizeof(CAN_MSG_FRAME));
+    ESP_LOGI("can2wifi", "sending %d msgs", count);
+    vTaskDelay(pdMS_TO_TICKS(1));
+}
 static void task_can2wifi()
 {
+    u16 sent;
     while (!mqttconnected)
         vTaskDelay(pdMS_TO_TICKS(80));
     APP_CANFDSPI_Init(NULL);
     // spitest();
-    const int maxCountPerPacket = 10;
-    uint8_t txb[1500];
-
-    // while(1)
-    // {
-    //     vTaskDelay(pdMS_TO_TICKS(100));
-    //     if (0 != DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &rxObj, msg.data, MAX_DATA_BYTES))
-    //     {
-    //         canStats = CAN_STAT_RXERROR;
-    //         continue;
-    //     }
-    //     ESP_LOGI("canrx","%2X %2X %2X %2X %2X %2X %2X %2X", msg.data[0], msg.data[1], msg.data[2], msg.data[3], msg.data[4], msg.data[5], msg.data[6], msg.data[7]);
-    // }
+    const int maxCountPerPacket = sizeof(canSendWifiTxBuffer) / sizeof(CAN_MSG_FRAME);
 
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        sent = 0;
         if (canSend2Wifi == NULL)
             continue;
-        for (int count = fifo_readable_item_count(rxMsgFifo); count > 0;)
+        for (int count = 0; (count = fifo_readable_item_count(rxMsgFifo)) > 0;)
         {
             if (count > maxCountPerPacket)
                 count = maxCountPerPacket;
-            fifo_read_batch(rxMsgFifo, txb, count);
-            // txb[count * sizeof(CAN_MSG_FRAME)] = '\0';
-            canSend2Wifi(txb, count * sizeof(CAN_MSG_FRAME));
-            count = 0;
+            sendone(count);
+            sent += count;
         }
+        ESP_LOGI("can2wifi sent", "%d", sent);
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
 void can_init()
@@ -275,11 +278,11 @@ void can_init()
     spican_rx_int_ptr = &can_rx_int_handler;
     canSendPtr = canEnqueueOneFrame;
     canSetFilterPtr = canSetFilter;
-    txMsgFifo = fifo_create(100, sizeof(CAN_CMD_FRAME));
-    rxMsgFifo = fifo_create(100, sizeof(CAN_MSG_FRAME));
-    xTaskCreatePinnedToCore(task_canrx, "task_canrx", 2048, NULL, 6, &rxHandle, 1);
-    xTaskCreatePinnedToCore(task_cantx, "task_cantx", 4096, NULL, 6, &txHandle, 1);
-    xTaskCreate(task_can2wifi, "task_can2wifi", 4096, NULL, 6, &wifiHandle);
+    txMsgFifo = fifo_create(400, sizeof(CAN_CMD_FRAME));
+    rxMsgFifo = fifo_create(400, sizeof(CAN_MSG_FRAME));
+    xTaskCreatePinnedToCore(task_canrx, "task_canrx", 4096, NULL, 24, &rxHandle, 1);
+    xTaskCreatePinnedToCore(task_cantx, "task_cantx", 4096, NULL, 20, &txHandle, 1);
+    xTaskCreatePinnedToCore(task_can2wifi, "task_can2wifi", 4096, NULL, 6, &wifiHandle, 0);
 }
 void APP_CANFDSPI_Init(void *p)
 {
@@ -490,14 +493,14 @@ static bool canSetFilter(CAN_FILTER_CFG *flt)
 {
     CAN_FILTER f = (CAN_FILTER)flt->filterId;
     DRV_CANFDSPI_FilterDisable(DRV_CANFDSPI_INDEX_0, f);
-    if (!flt->enabled)
-    {
-        ESP_LOGI("CAN", "Disable Filter%d\t", flt->filterId);
-        return true;
-    }
+    // if (!flt->enabled)
+    // {
+    //     ESP_LOGI("CAN", "Disable Filter%d\t", flt->filterId);
+    //     return true;
+    // }
     DRV_CANFDSPI_FilterObjectConfigure(DRV_CANFDSPI_INDEX_0, f, &flt->fObj);
     DRV_CANFDSPI_FilterMaskConfigure(DRV_CANFDSPI_INDEX_0, f, &flt->mObj);
-    DRV_CANFDSPI_FilterToFifoLink(DRV_CANFDSPI_INDEX_0, f, APP_RX_FIFO, true);
+    DRV_CANFDSPI_FilterToFifoLink(DRV_CANFDSPI_INDEX_0, f, APP_RX_FIFO, flt->enabled);
 
     ESP_LOGI("CAN", "Enable Filter%d\t", flt->filterId);
     return true;

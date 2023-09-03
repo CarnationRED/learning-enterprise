@@ -44,6 +44,7 @@ OF SUCH DAMAGE.
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "sdkconfig.h"
+#include "esp_log.h"
 #include "esp_attr.h"
 #include "esp32s3/rom/gpio.h"
 #include "soc/gpio_periph.h"
@@ -127,7 +128,7 @@ void DRV_SPI_Initialize(void)
   gpio_uninstall_isr_service();
 
   // install gpio isr service
-  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  gpio_install_isr_service(ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_EDGE);
   // hook isr handler for specific gpio pin
   gpio_isr_handler_add(INT_RX_IN, gpio_isr_handler, (void *)INT_RX_IN);
 }
@@ -144,14 +145,17 @@ void spi_master_init(void)
       .mosi_io_num = PIN_NUM_MOSI,
       .sclk_io_num = PIN_NUM_CLK,
       .quadwp_io_num = -1,
-      .quadhd_io_num = -1};
+      .quadhd_io_num = -1,
+      .isr_cpu_id =1,
+      .intr_flags = ESP_INTR_FLAG_LEVEL3
+      };
   spi_device_interface_config_t devcfg = {
-      .clock_speed_hz = 10 * 1000 * 1000, // Clock out at 20 MHz
+      .clock_speed_hz = 20 * 1000 * 1000, // Clock out at 20 MHz
       .mode = 0,                          // SPI mode 0
       .spics_io_num = PIN_NUM_CS,         // CS pin
       .cs_ena_pretrans = 1,
       .cs_ena_posttrans = 1,
-      .queue_size = 40,
+      .queue_size = 400,
   };
 
   // gpio_config_t conf;
@@ -207,6 +211,7 @@ void spi_master_init(void)
   // PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[PIN_NUM_MOSI], PIN_FUNC_GPIO);
 }
 
+static u8 lock = 0;
 int8_t spi_master_transfer(uint8_t *SpiTxData, uint8_t *SpiRxData, uint16_t spiTransferSize)
 {
   spi_transaction_t spi_packet;
@@ -215,7 +220,17 @@ int8_t spi_master_transfer(uint8_t *SpiTxData, uint8_t *SpiRxData, uint16_t spiT
   spi_packet.rx_buffer = SpiRxData;
   spi_packet.rxlength = 8 * spiTransferSize;
   spi_packet.length = 8 * spiTransferSize;
+  while (lock != 0)
+  {
+    ESP_LOGI("drv_spi", "spi yield");
+    portYIELD();
+  }
+  lock = 1;
   if (spi_device_transmit(spi, &spi_packet) != ESP_OK)
+  {
+    lock = 0;
     return 1;
+  }
+  lock = 0;
   return 0;
 }

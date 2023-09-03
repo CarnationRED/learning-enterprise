@@ -2,7 +2,7 @@
 #define __MSG_H__
 #include "stdint.h"
 #include "stdbool.h"
-#include "D:\LYSGZS\DfConnector-V2\learning-enterprise\mcp2518\drv_canfdspi_api.h"
+#include "drv_canfdspi_api.h"
 
 typedef uint64_t u64;
 typedef uint32_t u32;
