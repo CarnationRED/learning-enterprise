@@ -4,10 +4,10 @@
 #include "stdint.h"
 #include "stdbool.h"
 #include "msg.h"
-#define WIFI_SSID "DFM-PV"
-#define WIFI_IDENTITY "dfpv.com.cn"
-#define WIFI_USR "oa-pda-mas"
-#define WIFI_PWD "z4aIy^"
+#define WIFI_SSID "DfTest"
+#define WIFI_IDENTITY "oa-pda-mas1"
+#define WIFI_USR "oa-pda-mas1"
+#define WIFI_PWD "11111111"
 
 static int32_t t_sysInit, t_staInit, t_staConfig, t_ApCnted;
 

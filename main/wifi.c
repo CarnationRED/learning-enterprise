@@ -143,117 +143,117 @@ void cleanAllPrt()
     cleanPrt(sockCtrl);
     cleanPrt(sockReport);
 }
-void connectServer()
-{
-    for (uint16_t i = 0; i < 3; i++)
-    {
-        if (connectAllPrt())
-        {
-            wifiStats = WIFI_STAT_SVRCNTED;
-            xTaskCreate(taskDataUp,"taskDataUp",2048, NULL,3,&handleUp);
-            xTaskCreate(taskDataDown,"taskDataDown",2048, NULL,3,&handleDown);
-            return;
-        }
-        else
-        {
-            cleanAllPrt();
-            vTaskDelete(handleUp);
-            vTaskDelete(handleDown);
-        }
-    }
-    wifiStats = WIFI_STAT_ERRORCSVR;
-}
+// void connectServer()
+// {
+//     for (uint16_t i = 0; i < 3; i++)
+//     {
+//         if (connectAllPrt())
+//         {
+//             wifiStats = WIFI_STAT_SVRCNTED;
+//             xTaskCreate(taskDataUp,"taskDataUp",2048, NULL,3,&handleUp);
+//             xTaskCreate(taskDataDown,"taskDataDown",2048, NULL,3,&handleDown);
+//             return;
+//         }
+//         else
+//         {
+//             cleanAllPrt();
+//             vTaskDelete(handleUp);
+//             vTaskDelete(handleDown);
+//         }
+//     }
+//     wifiStats = WIFI_STAT_ERRORCSVR;
+// }
 
-void disconnectServer()
-{
-    cleanAllPrt();
-    wifiStats = WIFI_STAT_INIT;
-}
+// void disconnectServer()
+// {
+//     cleanAllPrt();
+//     wifiStats = WIFI_STAT_INIT;
+// }
 
-extern bool canSendOneFrame(CAN_CMD_FRAME *msg);
-/// @brief can't reference canSendOneFrame here, so canSendPtr is defined to solve this
+/// @brief can't reference canSendOneFrame here, so a pointer canSendPtr is defined to solve the bug
 /// @param msg
 /// @return
-bool (*canSendPtr)(CAN_CMD_FRAME *msg) = NULL;
-void taskDataDown()
-{
-    char rxb[1600];
-    while (1)
-    {
-        if (sockDataDown > 0)
-        {
-            int len = recv(sockDataDown, rxb, sizeof(rxb) - 1, 0);
-            if (len >= sizeof(DataDownMsg))
-            {
-                char *ptr = rxb;
-                DataDownMsg *head = (DataDownMsg *)ptr;
-                if (head != NULL)
-                {
-                    switch (head->type)
-                    {
-                    case SINGLE_FRAME:
-                        if (head->dataLen == head->elementSize * head->elementCount)
-                        {
-                            if (canSendPtr != NULL)
-                                canSendPtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)));
-                            // canSendOneFrame((CAN_CMD_FRAME *)ptr);
-                        }
-                        else
-                            wifiStats = WIFI_STAT_DATAERROR;
-                        break;
+// bool (*canSendPtr)(CAN_CMD_FRAME *msg) = NULL;
+// bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt) = NULL;
+// void taskDataDown()
+// {
+//     char rxb[1600];
+//     while (1)
+//     {
+//         if (sockDataDown > 0)
+//         {
+//             int len = recv(sockDataDown, rxb, sizeof(rxb) - 1, 0);
+//             if (len >= sizeof(DataDownMsg))
+//             {
+//                 char *ptr = rxb;
+//                 DataDownMsg *head = (DataDownMsg *)ptr;
+//                 if (head != NULL)
+//                 {
+//                     switch (head->type)
+//                     {
+//                     case SINGLE_FRAME:
+//                         if (head->dataLen == head->elementSize * head->elementCount)
+//                         {
+//                             if (canSendPtr != NULL)
+//                                 canSendPtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)));
+//                             // canSendOneFrame((CAN_CMD_FRAME *)ptr);
+//                         }
+//                         else
+//                             wifiStats = WIFI_STAT_DATAERROR;
+//                         break;
 
-                    default:
-                        wifiStats = WIFI_STAT_DATAERROR;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-extern int rxMsgFifo;
-extern int fifo_readable_item_count(int i);
-void taskDataUp()
-{
-    char txb[1024];
-    // cited:https://blog.csdn.net/weixin_45499326/article/details/129155557
-    uint32_t ulEventsToProcess;
-    int maxCountPerPacket = sizeof(txb) / sizeof(CAN_MSG_FRAME);
-    for (;;)
-    {
-        /* 此处阻塞以等待中断ISR直接发送过来的通知，并读取返回值。
-        这里阻塞超时时间比产生两个中断之间的周期要大于10毫秒，因此不会出现中断到达，而阻塞已到期，返回0的情况*/
-        ulEventsToProcess = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        if (ulEventsToProcess != 0)
-        {
-            // /* 要到达此处，必须至少发生了一个事件。在这里循环，直到处理完所有未决事件（在这种情况下，只需为每个事件打印一条消息）。 */
-            // while( ulEventsToProcess > 0 )
-            // {
-            // 	vPrintString( " Processing event.\r\n" );
-            // 	ulEventsToProcess--;
-            // }
-            for (int count = fifo_readable_item_count(rxMsgFifo); count > 0;)
-            {
-                if (count > maxCountPerPacket)
-                    count = maxCountPerPacket;
-                fifo_read_batch(rxMsgFifo, txb, count);
-                int ret = send(sockDataUp, txb, count * sizeof(CAN_MSG_FRAME), 0);
-                if (ret < 0)
-                {
-                    wifiStats = WIFI_STAT_SENDERROR;
-                }
-                else if (ret != sizeof(txb))
-                {
-                    wifiStats = WIFI_STAT_SENDIMCOMPL;
-                }
-            }
-        }
-        else
-        {
-            /* 如果达到了功能的这一部分，则中断未在预期时间内到达，并且（在实际应用程序中）可能需要执行一些错误恢复操作。 */
-        }
-    }
-}
+//                     default:
+//                         wifiStats = WIFI_STAT_DATAERROR;
+//                         break;
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
+// extern int rxMsgFifo;
+// extern int fifo_readable_item_count(int i);
+// void taskDataUp()
+// {
+//     char txb[1024];
+//     // cited:https://blog.csdn.net/weixin_45499326/article/details/129155557
+//     uint32_t ulEventsToProcess;
+//     int maxCountPerPacket = sizeof(txb) / sizeof(CAN_MSG_FRAME);
+//     for (;;)
+//     {
+//         /* 此处阻塞以等待中断ISR直接发送过来的通知，并读取返回值。
+//         这里阻塞超时时间比产生两个中断之间的周期要大于10毫秒，因此不会出现中断到达，而阻塞已到期，返回0的情况*/
+//         ulEventsToProcess = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+//         if (ulEventsToProcess != 0)
+//         {
+//             // /* 要到达此处，必须至少发生了一个事件。在这里循环，直到处理完所有未决事件（在这种情况下，只需为每个事件打印一条消息）。 */
+//             // while( ulEventsToProcess > 0 )
+//             // {
+//             // 	vPrintString( " Processing event.\r\n" );
+//             // 	ulEventsToProcess--;
+//             // }
+//             for (int count = fifo_readable_item_count(rxMsgFifo); count > 0;)
+//             {
+//                 if (count > maxCountPerPacket)
+//                     count = maxCountPerPacket;
+//                 fifo_read_batch(rxMsgFifo, txb, count);
+//                 int ret = send(sockDataUp, txb, count * sizeof(CAN_MSG_FRAME), 0);
+//                 if (ret < 0)
+//                 {
+//                     wifiStats = WIFI_STAT_SENDERROR;
+//                 }
+//                 else if (ret != sizeof(txb))
+//                 {
+//                     wifiStats = WIFI_STAT_SENDIMCOMPL;
+//                 }
+//             }
+//         }
+//         else
+//         {
+//             /* 如果达到了功能的这一部分，则中断未在预期时间内到达，并且（在实际应用程序中）可能需要执行一些错误恢复操作。 */
+//         }
+//     }
+// }
 
 
 #endif // !__WIFI_C__

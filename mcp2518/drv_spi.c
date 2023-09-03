@@ -53,21 +53,21 @@ OF SUCH DAMAGE.
 #include "hal/gpio_hal.h"
 #include "../main/include/can.h"
 
-#define PIN_NUM_MISO 11
-#define PIN_NUM_MOSI 13
-#define PIN_NUM_CLK 12
-#define PIN_NUM_CS 10
+#define PIN_NUM_MISO 7
+#define PIN_NUM_MOSI 15
+#define PIN_NUM_CLK 16
+#define PIN_NUM_CS 6
 
 // Interrupts
 #define INT_IN 8
 #define INT_TX_IN 17
 #define INT_RX_IN 18
-#define ESP_INTR_FLAG_DEFAULT 0//定义默认的中断标志为0
+#define ESP_INTR_FLAG_DEFAULT 0 // 定义默认的中断标志为0
 
 #define SPI_FLASH_CS_LOW() gpio_set_level(PIN_NUM_CS, 0)
 #define SPI_FLASH_CS_HIGH() gpio_set_level(PIN_NUM_CS, 1)
 
-static spi_device_handle_t spi;
+static spi_device_handle_t spi = NULL;
 // static QueueHandle_t gpio_evt_queue = NULL;
 void (*spican_rx_int_ptr)(void *para) = NULL;
 
@@ -90,12 +90,13 @@ inline int8_t spi_master_transfer(uint8_t *SpiTxData, uint8_t *SpiRxData, uint16
 // }
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
-  uint32_t gpio_num = (uint32_t)arg;
-  gpio_num |= canCurrentChannel << 24;
+  // volatile uint32_t gpio_num = (uint32_t)arg;
+  // gpio_num |= canCurrentChannel << 24;
   // xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
 
-  int io_num = gpio_num & 0x00FFFFFF;
-  printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
+  int io_num = (int)arg;
+  // int io_num = gpio_num & 0x00FFFFFF;
+  // printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level((gpio_num_t)io_num));
   if (spican_rx_int_ptr != NULL)
     (*spican_rx_int_ptr)((void *)(canCurrentChannel));
 }
@@ -122,6 +123,8 @@ void DRV_SPI_Initialize(void)
   // gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
   // start gpio task
   // xTaskCreate(task_spi_rx_int, "task_spi_rx_int", 2048, NULL, 10, NULL);
+
+  gpio_uninstall_isr_service();
 
   // install gpio isr service
   gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
@@ -150,6 +153,20 @@ void spi_master_init(void)
       .cs_ena_posttrans = 1,
       .queue_size = 40,
   };
+
+  // gpio_config_t conf;
+  // conf.intr_type=GPIO_INTR_DISABLE;
+  // conf.mode=GPIO_MODE_OUTPUT;
+  // conf.pin_bit_mask=PIN_NUM_CS;
+  // conf.pull_down_en=GPIO_PULLDOWN_DISABLE;
+  // conf.pull_up_en=GPIO_PULLUP_DISABLE;
+  // gpio_config(&conf);
+  // gpio_reset_pin(PIN_NUM_CS);
+  if (spi != NULL)
+  {
+    spi_bus_remove_device(spi);
+    spi_bus_free(SPI2_HOST);
+  }
   gpio_pad_select_gpio(PIN_NUM_CS);
   gpio_set_direction(PIN_NUM_CS, GPIO_MODE_OUTPUT);
   // Initialize the SPI bus

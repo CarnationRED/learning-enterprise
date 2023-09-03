@@ -13,20 +13,24 @@ typedef int32_t s32;
 typedef int16_t s16;
 typedef int8_t s8;
 
-typedef enum  
+typedef enum _DataDownMsgType
 {
-    SINGLE_FRAME=0,
-    MULTI_FRAMES=1,
-}DataDownMsgType;
+    SINGLE_FRAME = 0,
+    MULTI_FRAMES = 1,
+    SET_FILTER = 2,
+    UNDEFINED = 0xff
+} DataDownMsgType;
 /// @brief DownData Structure: [DataDownMsg][DataStruct0][DataStruct1][DataStruct2]...
-typedef struct 
+#pragma pack(2)
+typedef struct _DataDownMsg
 {
-    DataDownMsgType type;
-    u16 dataLen;
-    u16 elementCount;
-    u16 elementSize;
-    u16 serial;
-}DataDownMsg;
+    DataDownMsgType type : 16;
+    u16 dataLen : 16;
+    u16 elementCount : 16;
+    u16 elementSize : 16;
+    u16 serial : 16;
+} DataDownMsg;
+#pragma pack()
 
 #if 0
 
@@ -80,20 +84,39 @@ typedef union _CAN_TX_MSGOBJ {
     uint32_t word[3];
     uint8_t byte[12];
 } CAN_TX_MSGOBJ;
-#endif 
+#endif
 
-typedef struct 
+typedef struct
 {
-	CAN_TX_MSGOBJ txObj;
+    CAN_TX_MSGOBJ txObj;
     u8 channel;
-	u8 data[64];
-}CAN_CMD_FRAME;
+    u8 data[64];
+} CAN_CMD_FRAME;
 
-typedef struct 
+typedef struct
 {
-	CAN_RX_MSGOBJ rxObj;
-    u8 channel;
-	u8 data[64];
-}CAN_MSG_FRAME;
+    CAN_FILTEROBJ_ID fObj; // 4 bytes
+    CAN_MASKOBJ_ID mObj;   // 4 bytes
+    u8 filterId;           // 1
+    u8 enabled;            // 1
+    u8 reserved0;          // 1
+    u8 reserved1;          // 1
+} CAN_FILTER_CFG;
 
+typedef struct
+{
+    CAN_RX_MSGOBJ rxObj;
+    u8 channel;
+    u8 data[64];
+} CAN_MSG_FRAME;
+
+typedef enum
+{
+    MSG_NO_ERROR,
+    MSG_DATALEN_MISMATCH,
+    MSG_DATA_FORMAT_ERROR,
+
+} MSG_STATS;
+
+void msg_init();
 #endif // !__MSG_H__

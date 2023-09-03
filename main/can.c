@@ -4,7 +4,6 @@
 #include "stdbool.h"
 #include <stdio.h>
 #include "msg.h"
-#include "wifi.h"
 #include "can.h"
 #include "drv_spi.h"
 #include "drv_canfdspi_api.h"
@@ -18,6 +17,7 @@
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 #include "esp_system.h"
+#include "mqtt.h"
 
 CAN_STATS canStats = CAN_STAT_INIT;
 
@@ -33,8 +33,12 @@ CAN_STATS canStats = CAN_STAT_INIT;
 #define CH444G_SW0 36
 #define CH444G_SW1 35
 #define CH444G_SWEN 45
-#define SWENABLE() gpio_set_level(CH444G_SWEN, 0)
-#define SWDISABLE() gpio_set_level(CH444G_SWEN, 1)
+#define SWENABLE()                 \
+    gpio_pulldown_en(CH444G_SWEN); \
+    gpio_pulldown_dis(CH444G_SWEN)
+#define SWDISABLE()                    \
+    gpio_pulldown_dis(CH444G_SWEN, 1); \
+    gpio_pullup_en(CH444G_SWEN)
 #define SW0_0() gpio_set_level(CH444G_SW0, 0)
 #define SW1_0() gpio_set_level(CH444G_SW1, 0)
 #define SW0_1() gpio_set_level(CH444G_SW0, 1)
@@ -68,13 +72,19 @@ static CAN_RX_FIFO_CONFIG rxConfig;
 static REG_CiFLTOBJ fObj;
 static REG_CiMASK mObj;
 static CAN_RX_FIFO_EVENT rxFlags;
-static CAN_RX_MSGOBJ rxObj;
 
+static TaskHandle_t txHandle, rxHandle, wifiHandle;
 int rxMsgFifo = 0;
-static CAN_MSG_FRAME msg={};
+int txMsgFifo = 0;
+static CAN_MSG_FRAME msg = {};
 
 extern void (*spican_rx_int_ptr)(void *para);
-extern bool (*canSendPtr )(CAN_CMD_FRAME * msg);
+extern bool (*canSendPtr)(CAN_CMD_FRAME *msg);
+extern bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt);
+extern bool mqttconnected;
+static char *canErrStr = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\0";
+
+void (*canSend2Wifi)(uint8_t *data, int len) = NULL;
 
 static bool APP_TestRamAccess(void)
 {
@@ -123,43 +133,153 @@ static bool APP_TestRamAccess(void)
     return true;
 }
 
+static void can_rx_int_handler(void *para)
+{
+    BaseType_t xHigherProrityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(rxHandle, &xHigherProrityTaskWoken);
+    portYIELD_FROM_ISR(xHigherProrityTaskWoken);
+
+    // xTaskNotifyGive(rxHandle);
+    // if (!APP_RX_INT())
+    //     return;
+    // if (0 != DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &rxObj, msg.data, MAX_DATA_BYTES))
+    // {
+    //     canStats = CAN_STAT_RXERROR;
+    // }
+    // msg.rxObj = rxObj;
+    // msg.channel = (u8)para;
+    // if (!fifo_write(rxMsgFifo, &msg))
+    // {
+    //     if (!fifo_writeable(rxMsgFifo))
+    //         canStats = CAN_STAT_RXQERROR;
+    //     else if (!fifo_writeable_item_count(rxMsgFifo))
+    //         canStats = CAN_STAT_RXQFULL;
+    // }
+    // else
+    // {
+    //     // BaseType_t xHigherPriorityTaskWoken;
+    //     // xHigherPriorityTaskWoken = pdFALSE;
+    //     // vTaskNotifyGiveFromISR(taskDataUp, &xHigherPriorityTaskWoken);
+    //     // portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    // }
+}
 void canChannelInit()
 {
-    gpio_pad_select_gpio(CH444G_SW0);
-    gpio_pad_select_gpio(CH444G_SW1);
-    gpio_pad_select_gpio(CH444G_SWEN);
+    esp_rom_gpio_pad_select_gpio(CH444G_SW0);
+    gpio_set_direction(CH444G_SW0, GPIO_MODE_OUTPUT);
+    // gpio_set_pull_mode(CH444G_SW0, GPIO_PULLUP_PULLDOWN);
+    esp_rom_gpio_pad_select_gpio(CH444G_SW1);
+    gpio_set_direction(CH444G_SW1, GPIO_MODE_OUTPUT);
+    // gpio_set_pull_mode(CH444G_SW1, GPIO_PULLUP_PULLDOWN);
+    esp_rom_gpio_pad_select_gpio(CH444G_SWEN);
+    // gpio_set_direction(CH444G_SWEN, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(CH444G_SWEN, GPIO_PULLUP_PULLDOWN);
 }
-void can_rx_int_handler(void *para)
+static void task_canrx()
 {
-    if (!APP_RX_INT())
-        return;
-    if (0 != DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &rxObj, msg.data, MAX_DATA_BYTES))
+    u8 result;
+    u8 count = 0;
+    while (1)
     {
-        canStats = CAN_STAT_RXERROR;
-    }
-    msg.rxObj = rxObj;
-    msg.channel = (u8)para;
-    if (!fifo_write(rxMsgFifo, &msg))
-    {
-        if (!fifo_writeable(rxMsgFifo))
-            canStats = CAN_STAT_RXQERROR;
-        else if (!fifo_writeable_item_count(rxMsgFifo))
-            canStats = CAN_STAT_RXQFULL;
-    }
-    else
-    {
-        BaseType_t xHigherPriorityTaskWoken;
-        xHigherPriorityTaskWoken = pdFALSE;
-        vTaskNotifyGiveFromISR(taskDataUp, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        while (APP_RX_INT())
+        {
+            result = DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &msg.rxObj, msg.data, MAX_DATA_BYTES);
+            if (0 != result)
+            {
+                canStats = CAN_STAT_RXERROR;
+                sprintf(canErrStr, "can get recv err: %d", result);
+                mqtt_report_pulish(canErrStr, 0);
+                continue;
+            }
+            else
+            {
+                if (!fifo_write(rxMsgFifo, (void *)&msg))
+                {
+                    sprintf(canErrStr, "can recv fifo full, discard");
+                    mqtt_report_pulish(canErrStr, 0);
+                    continue;
+                }
+                count++;
+                sprintf(canErrStr, "0x%X: %02X %02X %02X %02X %02X %02X %02X %02X", msg.rxObj.bF.id.SID, msg.data[0], msg.data[1], msg.data[2], msg.data[3], msg.data[4], msg.data[5], msg.data[6], msg.data[7]);
+                ESP_LOGI("canrx","%s", canErrStr);
+            }
+            if (count == 10)
+            {
+                count = 0;
+                xTaskNotifyGive(wifiHandle);
+            }
+        }
+        vTaskDelay(1);
     }
 }
-void canInit()
+static void task_cantx()
+{
+    CAN_MSG_FRAME msg;
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        while (fifo_readable(txMsgFifo))
+        {
+            if (fifo_read(txMsgFifo, &msg))
+                if (!canSendOneFrame(&msg))
+                {
+                    mqtt_report_pulish(canErrStr, 0);
+                }
+        }
+        vTaskDelay(1);
+    }
+}
+static void task_can2wifi()
+{
+    while (!mqttconnected)
+        vTaskDelay(pdMS_TO_TICKS(80));
+    APP_CANFDSPI_Init(NULL);
+    // spitest();
+    const int maxCountPerPacket = 10;
+    uint8_t txb[1500];
+
+    // while(1)
+    // {
+    //     vTaskDelay(pdMS_TO_TICKS(100));
+    //     if (0 != DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &rxObj, msg.data, MAX_DATA_BYTES))
+    //     {
+    //         canStats = CAN_STAT_RXERROR;
+    //         continue;
+    //     }
+    //     ESP_LOGI("canrx","%2X %2X %2X %2X %2X %2X %2X %2X", msg.data[0], msg.data[1], msg.data[2], msg.data[3], msg.data[4], msg.data[5], msg.data[6], msg.data[7]);
+    // }
+
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (canSend2Wifi == NULL)
+            continue;
+        for (int count = fifo_readable_item_count(rxMsgFifo); count > 0;)
+        {
+            if (count > maxCountPerPacket)
+                count = maxCountPerPacket;
+            fifo_read_batch(rxMsgFifo, txb, count);
+            // txb[count * sizeof(CAN_MSG_FRAME)] = '\0';
+            canSend2Wifi(txb, count * sizeof(CAN_MSG_FRAME));
+            count = 0;
+        }
+    }
+}
+void can_init()
 {
     canChannelInit();
+    SWENABLE();
     spican_rx_int_ptr = &can_rx_int_handler;
-    canSendPtr=canSendOneFrame;
+    canSendPtr = canEnqueueOneFrame;
+    canSetFilterPtr = canSetFilter;
+    txMsgFifo = fifo_create(100, sizeof(CAN_CMD_FRAME));
     rxMsgFifo = fifo_create(100, sizeof(CAN_MSG_FRAME));
+    xTaskCreatePinnedToCore(task_canrx, "task_canrx", 2048, NULL, 6, &rxHandle, 1);
+    xTaskCreatePinnedToCore(task_cantx, "task_cantx", 4096, NULL, 6, &txHandle, 1);
+    xTaskCreate(task_can2wifi, "task_can2wifi", 4096, NULL, 6, &wifiHandle);
 }
 void APP_CANFDSPI_Init(void *p)
 {
@@ -177,6 +297,7 @@ void APP_CANFDSPI_Init(void *p)
     s = DRV_CANFDSPI_ConfigureObjectReset(&config);
     config.IsoCrcEnable = 1;
     config.StoreInTEF = 0;
+    config.RestrictReTxAttempts = 1;
 
     s = DRV_CANFDSPI_Configure(DRV_CANFDSPI_INDEX_0, &config);
 
@@ -192,6 +313,7 @@ void APP_CANFDSPI_Init(void *p)
     txConfig.FifoSize = 12;
     txConfig.PayLoadSize = CAN_PLSIZE_64;
     txConfig.TxPriority = 1;
+    txConfig.TxAttempts = 1;
 
     s = DRV_CANFDSPI_TransmitChannelConfigure(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &txConfig);
 
@@ -247,7 +369,7 @@ void spitest()
     long b = 0;
     while (1)
     {
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(500));
         // Configure transmit message
         txObj.word[0] = 0;
         txObj.word[1] = 0;
@@ -278,8 +400,9 @@ bool _canWaitTxFifoEmpty()
             return false;
         if (stat == CAN_TX_FIFO_EMPTY)
             return true;
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
+    APP_CANFDSPI_Init(NULL);
     return false;
 }
 bool canSwitchChannel(u8 channel)
@@ -318,11 +441,22 @@ bool canSwitchChannel(u8 channel)
         default:
             return false;
         }
+        sprintf(canErrStr, "channel switch: %d->%d", canCurrentChannel, channel);
+        mqtt_report_pulish(canErrStr, 0);
         canCurrentChannel = channel;
     }
     return true;
 }
-static bool canSendOneFrame(CAN_CMD_FRAME * msg)
+static bool canEnqueueOneFrame(CAN_CMD_FRAME *msg)
+{
+    if (fifo_writeable(txMsgFifo))
+    {
+        fifo_write(txMsgFifo, (void *)msg);
+        xTaskNotifyGive(txHandle);
+    }
+    return true;
+}
+static bool canSendOneFrame(CAN_CMD_FRAME *msg)
 {
     if (canSwitchChannel(msg->channel)) // switch to correct channel
     {
@@ -332,19 +466,41 @@ static bool canSendOneFrame(CAN_CMD_FRAME * msg)
             if (retry++ == 10)
             {
                 canStats = CAN_STAT_TXQFULL;
+                canErrStr = "wait txq timeout";
                 return false;
             }
             vTaskDelay(pdMS_TO_TICKS(50));
         }
-        if (DRV_CANFDSPI_TransmitChannelLoad(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &(msg->txObj), msg->data, DRV_CANFDSPI_DlcToDataBytes(msg->txObj.bF.ctrl.DLC), true) != 0)
+        int sendresult = DRV_CANFDSPI_TransmitChannelLoad(DRV_CANFDSPI_INDEX_0, APP_TX_FIFO, &(msg->txObj), msg->data, DRV_CANFDSPI_DlcToDataBytes(msg->txObj.bF.ctrl.DLC), true);
+        if (sendresult != 0)
         {
+            ESP_LOGI("CAN", "Error: %d", sendresult);
             canStats = CAN_STAT_TXERROR;
+            sprintf(canErrStr, "txq load err:%d", sendresult);
             return false;
         }
+        ESP_LOGI("CAN", "Send:\t%d\tserial:\t%d", sendresult, msg->channel);
         return true;
     }
+    canErrStr = "channel switch failed";
     return false;
 }
 
+static bool canSetFilter(CAN_FILTER_CFG *flt)
+{
+    CAN_FILTER f = (CAN_FILTER)flt->filterId;
+    DRV_CANFDSPI_FilterDisable(DRV_CANFDSPI_INDEX_0, f);
+    if (!flt->enabled)
+    {
+        ESP_LOGI("CAN", "Disable Filter%d\t", flt->filterId);
+        return true;
+    }
+    DRV_CANFDSPI_FilterObjectConfigure(DRV_CANFDSPI_INDEX_0, f, &flt->fObj);
+    DRV_CANFDSPI_FilterMaskConfigure(DRV_CANFDSPI_INDEX_0, f, &flt->mObj);
+    DRV_CANFDSPI_FilterToFifoLink(DRV_CANFDSPI_INDEX_0, f, APP_RX_FIFO, true);
+
+    ESP_LOGI("CAN", "Enable Filter%d\t", flt->filterId);
+    return true;
+}
 
 #endif // !__CAN_C__

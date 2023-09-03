@@ -5,8 +5,11 @@
 
 
 void spitest();
+void can_init();
 void APP_CANFDSPI_Init(void *p);
+static bool canEnqueueOneFrame(CAN_CMD_FRAME * msg);
 static bool canSendOneFrame(CAN_CMD_FRAME * msg);
+static bool canSetFilter(CAN_FILTER_CFG *flt);
 
 typedef enum
 {

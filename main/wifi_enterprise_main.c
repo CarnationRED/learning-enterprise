@@ -34,8 +34,9 @@
 #include "u8g2.h"
 #include "oled.h"
 #include "u8g2_wqy.h"
+#include "msg.h"
 #include "can.h"
-#include "wifi.h"
+#include "mqtt.h"
 #include "task.h"
 
 /* The examples use simple WiFi configuration that you can set via
@@ -61,6 +62,9 @@ extern char *thisIp;
 extern char *thisGw;
 extern char *thisMask;
 extern WIFI_STATS wifiStats;
+extern int subscribed;
+extern void (*mqtt_start)(void);
+extern void (*canSend2Wifi)(char *data, int len);
 
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
 static EventGroupHandle_t wifi_event_group;
@@ -87,11 +91,13 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
     {
         wifiStats = WIFI_STAT_APCNTING;
+        ESP_LOGI("WIFI", "Connecting");
         esp_wifi_connect();
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
         wifiStats = WIFI_STAT_APLOST;
+        ESP_LOGI("WIFI", "Re-Connecting");
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
     }
@@ -107,6 +113,8 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             sprintf(thisIp, IPSTR, IP2STR(&ip.ip));
             sprintf(thisMask, IPSTR, IP2STR(&ip.netmask));
             sprintf(thisGw, IPSTR, IP2STR(&ip.gw));
+
+            mqtt_start();
             /* printf("~~~~~~~~~~~");
              printf("IP:%s\n", thisIp);
              // printf("Startup: sys(%ldms) app(%ldms)", t_sysInit * 10, (t_staInit - t_sysInit) * 10);
@@ -173,6 +181,84 @@ void initialise_wifi(void)
     vTaskDelete(NULL);
     vTaskDelay(2000);
 }
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT BIT1
+void initialise_wifi_noneEnt(void)
+{
+    t_staInit = xTaskGetTickCount();
+    wifiStats = WIFI_STAT_INIT;
+    wifi_event_group = xEventGroupCreate();
+
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    sta_netif = esp_netif_create_default_wifi_sta();
+    assert(sta_netif);
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                        IP_EVENT_STA_GOT_IP,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_got_ip));
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = WIFI_SSID,
+            .password = WIFI_PWD,
+            /* Authmode threshold resets to WPA2 as default if password matches WPA2 standards (pasword len => 8).
+             * If you want to connect the device to deprecated WEP/WPA networks, Please set the threshold value
+             * to WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK and set the password with length and format matching to
+             * WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK standards.
+             */
+            .threshold.authmode = 4,
+            .sae_pwe_h2e = WPA3_SAE_PWE_BOTH,
+        },
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "wifi_init_sta finished.");
+
+    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
+     * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
+    EventBits_t bits = xEventGroupWaitBits(wifi_event_group,
+                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                           pdFALSE,
+                                           pdFALSE,
+                                           portMAX_DELAY);
+
+    /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
+     * happened. */
+    if (bits & WIFI_CONNECTED_BIT)
+    {
+        ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
+                 WIFI_SSID, WIFI_PWD);
+    }
+    else if (bits & WIFI_FAIL_BIT)
+    {
+        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
+                 WIFI_SSID, WIFI_PWD);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "UNEXPECTED EVENT");
+    }
+    t_staConfig = xTaskGetTickCount();
+    vTaskDelay(2000);
+    vTaskDelete(NULL);
+    vTaskDelay(2000);
+}
 
 extern void spitest();
 extern void task_mechine();
@@ -184,10 +270,25 @@ void app_main(void)
     // initialise_wifi();
     //  xTaskCreate(&wpa2_enterprise_example_task, "wpa2_enterprise_example_task", 4096, NULL, 5, &hdle1);
     //  xTaskCreate(&APP_CANFDSPI_Init, "APP_CANFDSPI_Init", 4096, NULL, 5, &hdle);
-    xTaskCreate(&initialise_wifi, "init_wifi", 4096, NULL, 4, &hdle0);
-    xTaskCreate(&task_mechine, "wifi_task", 4096, NULL, 3, &hdle1);
-    //xTaskCreate(&spitest, "spitest", 4096, NULL, 5, &hdle2);
-    //xTaskCreate(&led, "led", 4096, NULL, 6, &hdle3);
+    xTaskCreate(&initialise_wifi_noneEnt, "init_wifi", 4096, NULL, 4, &hdle0);
+    // xTaskCreate(&task_mechine, "wifi_task", 4096, NULL, 3, &hdle1);
+    // xTaskCreate(&spitest, "spitest", 4096, NULL, 5, &hdle2);
+    // xTaskCreate(&led, "led", 4096, NULL, 6, &hdle3);
+    canSend2Wifi = mqtt_dataUp_pulish;
+    // ESP_LOGI(TAG, "sizeof ReportMsg=%d", sizeof(ReportMsg));
+    // ESP_LOGI(TAG, "sizeof ReportMsg=%d", sizeof(ReportMsg));
+    // ESP_LOGI(TAG, "sizeof ReportMsg=%d", sizeof(ReportMsg));
+    can_init();
+    msg_init();
+//    volatile int s1 = sizeof(CAN_TX_MSGOBJ);
+//    volatile int s2 = sizeof(CAN_MSGOBJ_ID);
+//    volatile int s3 = sizeof(CAN_TX_MSGOBJ_CTRL);
+//    volatile int s4 = sizeof(CAN_MSG_TIMESTAMP);
+//    volatile CAN_CMD_FRAME ss;
+//    ss.txObj.word[0]=  ss.txObj.word[1]=  ss.txObj.word[2]=0;
+//    ss.txObj.bF.id.EID=0x112;
+//    ss.txObj.bF.id.SID=0x112;
+//    ss.txObj.bF.id.SID=0x113;
 }
 void led()
 {

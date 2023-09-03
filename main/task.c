@@ -40,46 +40,46 @@ void checkStats()
             vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
-void task_mechine()
-{
-    while (1)
-    {
-        WIFI_STATS temp = wifiStats;
-        switch (wifiStats)
-        {
-        case WIFI_STAT_INIT:
-            break;
-        case WIFI_STAT_ERRORINIT:
-            break;
-        case WIFI_STAT_ERRORPING:
-            break;
-        case WIFI_STAT_ERRORCSVR:
-            break;
-        case WIFI_STAT_APCNTING:
-            break;
-        case WIFI_STAT_APCNTED:
-            pingServer();
-        case WIFI_STAT_SVRFOUND:
-            wifiStats = WIFI_STAT_SVRCNTING;
-            connectServer();
-            break;
-        case WIFI_STAT_SVRCNTING:
-            break;
-        case WIFI_STAT_SVRCNTED:
-            wifiStats = WIFI_STAT_IDLE;
-            xTaskCreate(taskDataDown,"taskDataDown",4096, NULL, 3, NULL);
-            break;
-        case WIFI_STAT_IDLE:
-            break;
-        case WIFI_STAT_SVRLOST:
-            break;
-        case WIFI_STAT_APLOST:
-            break;
+// void task_mechine()
+// {
+//     while (1)
+//     {
+//         WIFI_STATS temp = wifiStats;
+//         switch (wifiStats)
+//         {
+//         case WIFI_STAT_INIT:
+//             break;
+//         case WIFI_STAT_ERRORINIT:
+//             break;
+//         case WIFI_STAT_ERRORPING:
+//             break;
+//         case WIFI_STAT_ERRORCSVR:
+//             break;
+//         case WIFI_STAT_APCNTING:
+//             break;
+//         case WIFI_STAT_APCNTED:
+//             pingServer();
+//         case WIFI_STAT_SVRFOUND:
+//             wifiStats = WIFI_STAT_SVRCNTING;
+//             connectServer();
+//             break;
+//         case WIFI_STAT_SVRCNTING:
+//             break;
+//         case WIFI_STAT_SVRCNTED:
+//             wifiStats = WIFI_STAT_IDLE;
+//             xTaskCreate(taskDataDown,"taskDataDown",4096, NULL, 3, NULL);
+//             break;
+//         case WIFI_STAT_IDLE:
+//             break;
+//         case WIFI_STAT_SVRLOST:
+//             break;
+//         case WIFI_STAT_APLOST:
+//             break;
 
-        default:
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
+//         default:
+//             break;
+//         }
+//         vTaskDelay(pdMS_TO_TICKS(10));
+//     }
+// }
 #endif // !__TASK__
