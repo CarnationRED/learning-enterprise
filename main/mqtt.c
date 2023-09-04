@@ -126,11 +126,13 @@ static void mqtt_app_start(void)
     subscribed = false;
     esp_mqtt_client_config_t mqtt_cfg = {
         .session.protocol_ver = MQTT_PROTOCOL_V_3_1_1,
-        .broker.address.uri = "mqtt://esp32s3:pwd@192.168.4.2:2222",
+        .broker.address.uri = "mqtt://esp32s3:pwd@192.168.137.55:2222",
         // .session.keepalive = 2, // 1s
         .session.disable_keepalive = false, // 1s
         // .broker.address.port = 2222,
-        .buffer.size = 4096,
+        .task.priority=10,
+        .buffer.size = 16384,
+        .buffer.out_size = 16384,
     };
 
     client = esp_mqtt_client_init(&mqtt_cfg);
@@ -144,7 +146,7 @@ void (*mqtt_start)(void) = &mqtt_app_start;
 void mqtt_dataUp_pulish(char *data, int len)
 {
     int msg_id;
-    msg_id = esp_mqtt_client_publish(client, tup, data, len, 2, 0);
+    msg_id = esp_mqtt_client_publish(client, tup, data, len, 0, 0);
     //ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
 }
 

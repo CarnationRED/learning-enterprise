@@ -74,10 +74,11 @@ static REG_CiMASK mObj;
 static CAN_RX_FIFO_EVENT rxFlags;
 
 static TaskHandle_t txHandle, rxHandle, wifiHandle;
-int rxMsgFifo = 0;
+Queue_t rxMsgFifo;
 int txMsgFifo = 0;
 static CAN_MSG_FRAME msg = {};
 uint8_t canSendWifiTxBuffer[16384];
+int sentFrames = 0;
 
 extern void (*spican_rx_int_ptr)(void *para);
 extern bool (*canSendPtr)(CAN_CMD_FRAME *msg);
@@ -180,10 +181,12 @@ static void task_canrx()
 {
     u8 result;
     u8 count = 0;
-    u8 tick;
+    CAN_RX_FIFO_EVENT evt;
     while (1)
     {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        DRV_CANFDSPI_ReceiveChannelEventGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &evt);
+        if (!(evt & CAN_RX_FIFO_NOT_EMPTY_EVENT))
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         count = 0;
         while (APP_RX_INT())
         {
@@ -197,8 +200,7 @@ static void task_canrx()
             }
             else
             {
-                tick = xTaskGetTickCount();
-                if (!fifo_write(rxMsgFifo, (void *)&msg))
+                if (!q_push(&rxMsgFifo, (void *)&msg))
                 {
                     sprintf(canErrStr, "can recv fifo full, discard");
                     mqtt_report_pulish(canErrStr, 0);
@@ -206,25 +208,37 @@ static void task_canrx()
                 }
                 count++;
                 // sprintf(canErrStr, "0x%X", msg.rxObj.bF.id.SID);
-                // tick = xTaskGetTickCount() - tick;
                 // ESP_LOGI("canrx", "count: %d\ttick:%d\t%s", count, tick, canErrStr);
             }
-            if (count == 32)
+            if (count == 12)
             {
                 count = 0;
                 xTaskNotifyGive(wifiHandle);
             }
         }
         xTaskNotifyGive(wifiHandle);
-        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 static void task_cantx()
 {
     CAN_MSG_FRAME msg;
+    int lastSent = 0;
     while (1)
     {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        int s = sentFrames;
+        u8 times = 0;
+        while (s == sentFrames && sentFrames != lastSent)
+        {
+            times++;
+            vTaskDelay(100);
+            if (times == 10)
+            {
+                ESP_LOGI("can2wifi sent", "%d\n     Free Heap Memory: %dkb", sentFrames - lastSent, xPortGetFreeHeapSize() / 1024);
+                lastSent = sentFrames;
+            }
+        }
+
+        // ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         while (fifo_readable(txMsgFifo))
         {
@@ -239,15 +253,22 @@ static void task_cantx()
 }
 static void sendone(int count)
 {
-    fifo_read_batch(rxMsgFifo, canSendWifiTxBuffer, count);
+    void *ptr = (void *)&canSendWifiTxBuffer;
+    for (int i = count; i > 0; i--)
+    {
+        if (!q_pop(&rxMsgFifo, ptr))
+        {
+            sprintf(canErrStr, "pop from rxMsgFifo failed");
+            mqtt_report_pulish(canErrStr, 0);
+        }
+        ptr += sizeof(CAN_MSG_FRAME);
+    }
     // txb[count * sizeof(CAN_MSG_FRAME)] = '\0';
     canSend2Wifi(canSendWifiTxBuffer, count * sizeof(CAN_MSG_FRAME));
-    ESP_LOGI("can2wifi", "sending %d msgs", count);
-    vTaskDelay(pdMS_TO_TICKS(1));
+    // ESP_LOGI("can2wifi", "sending %d msgs", count);
 }
 static void task_can2wifi()
 {
-    u16 sent;
     while (!mqttconnected)
         vTaskDelay(pdMS_TO_TICKS(80));
     APP_CANFDSPI_Init(NULL);
@@ -257,18 +278,16 @@ static void task_can2wifi()
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        sent = 0;
         if (canSend2Wifi == NULL)
             continue;
-        for (int count = 0; (count = fifo_readable_item_count(rxMsgFifo)) > 0;)
+        for (int count = 0; (count = q_getCount(&rxMsgFifo)) > 0;)
         {
             if (count > maxCountPerPacket)
                 count = maxCountPerPacket;
             sendone(count);
-            sent += count;
+            sentFrames += count;
         }
-        ESP_LOGI("can2wifi sent", "%d", sent);
-        vTaskDelay(pdMS_TO_TICKS(2));
+        // ESP_LOGI("can2wifi sent", "%d", sent);
     }
 }
 void can_init()
@@ -279,10 +298,10 @@ void can_init()
     canSendPtr = canEnqueueOneFrame;
     canSetFilterPtr = canSetFilter;
     txMsgFifo = fifo_create(400, sizeof(CAN_CMD_FRAME));
-    rxMsgFifo = fifo_create(400, sizeof(CAN_MSG_FRAME));
+    q_init(&rxMsgFifo, sizeof(CAN_MSG_FRAME), 1000, FIFO, false);
     xTaskCreatePinnedToCore(task_canrx, "task_canrx", 4096, NULL, 24, &rxHandle, 1);
     xTaskCreatePinnedToCore(task_cantx, "task_cantx", 4096, NULL, 20, &txHandle, 1);
-    xTaskCreatePinnedToCore(task_can2wifi, "task_can2wifi", 4096, NULL, 6, &wifiHandle, 0);
+    xTaskCreatePinnedToCore(task_can2wifi, "task_can2wifi", 4096, NULL, 12, &wifiHandle, 0);
 }
 void APP_CANFDSPI_Init(void *p)
 {

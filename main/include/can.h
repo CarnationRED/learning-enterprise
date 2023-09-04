@@ -2,6 +2,7 @@
 #define __CAN_H__
 #include "msg.h"
 #include "fifo.h"
+#include "cQueue.h"
 
 
 void spitest();
@@ -23,6 +24,7 @@ typedef enum
     CAN_STAT_RXQERROR,
     CAN_STAT_DATAERROR,
 } CAN_STATS;
-extern int rxMsgFifo;
+
+extern Queue_t rxMsgFifo;
 extern u8 canCurrentChannel;
 #endif

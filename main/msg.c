@@ -6,14 +6,14 @@ MSG_STATS msgStats;
 extern CAN_STATS canStats;
 typedef struct _ReportMsg
 {
-    u8 isResponse;//1
-    u8 responseSuccess;//1
-    u8 reserved0;//1
-    u8 reserved1;//1
+    u8 isResponse;      // 1
+    u8 responseSuccess; // 1
+    u8 reserved0;       // 1
+    u8 reserved1;       // 1
 
-    DataDownMsgType responseType;//4
-    MSG_STATS msgStats;//4
-    CAN_STATS canStats;//4
+    DataDownMsgType responseType; // 4
+    MSG_STATS msgStats;           // 4
+    CAN_STATS canStats;           // 4
 } ReportMsg;
 
 u8 rptBuffer[sizeof(ReportMsg) + 1];
@@ -78,7 +78,13 @@ void dataCtrl(int len, u8 *data)
                 if (head->dataLen == head->elementSize * head->elementCount)
                 {
                     if (canSetFilterPtr != NULL)
-                        success = canSetFilterPtr((CAN_FILTER_CFG *)(ptr + sizeof(DataDownMsg)));
+                    {
+                        success = true;
+                        for (size_t i = 0; i < head->elementCount; i++)
+                        {
+                            success &= canSetFilterPtr((CAN_FILTER_CFG *)(ptr + sizeof(DataDownMsg) + i * head->elementSize));
+                        }
+                    }
                     // canSendOneFrame((CAN_CMD_FRAME *)ptr);
                 }
                 else
