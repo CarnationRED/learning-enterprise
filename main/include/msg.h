@@ -95,6 +95,14 @@ typedef struct
 
 typedef struct
 {
+    CAN_TX_MSGOBJ txObj;
+    u8 channel;
+    u16 frames;
+    u8 data[1408];
+} CAN_CMD_MULTIFRAME;
+
+typedef struct
+{
     CAN_FILTEROBJ_ID fObj; // 4 bytes
     CAN_MASKOBJ_ID mObj;   // 4 bytes
     u8 filterId;           // 1

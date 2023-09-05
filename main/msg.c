@@ -53,7 +53,19 @@ void dataDown(int len, u8 *data)
                 else
                     msgStats = MSG_DATALEN_MISMATCH;
                 break;
-
+            case MULTI_FRAMES:
+                if (head->dataLen == head->elementSize * head->elementCount)
+                {
+                    if (canSendPtr != NULL)
+                        for (size_t i = 0; i < head->elementCount; i++)
+                        {
+                            canSendPtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)+ i * head->elementSize));
+                        }
+                    // canSendOneFrame((CAN_CMD_FRAME *)ptr);
+                }
+                else
+                    msgStats = MSG_DATALEN_MISMATCH;
+                break;
             default:
                 msgStats = MSG_DATA_FORMAT_ERROR;
                 break;
