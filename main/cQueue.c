@@ -121,6 +121,9 @@ void __attribute__((nonnull)) q_flush(Queue_t *const pQ)
 	pQ->cnt = 0;
 }
 
+int push_wait=0;
+int pull_wait=0;
+
 bool __attribute__((nonnull)) q_push(Queue_t *const pQ, const void *const record)
 {
 	if ((!pQ->ovw) && q_isFull(pQ))
@@ -129,7 +132,9 @@ bool __attribute__((nonnull)) q_push(Queue_t *const pQ, const void *const record
 	}
 
 	while (pQ->lock)
-		;
+	{
+		push_wait++;
+	}
 	pQ->lock = 1;
 	uint8_t *const pStart = pQ->queue + (pQ->rec_sz * pQ->in);
 	memcpy(pStart, record, pQ->rec_sz);
@@ -162,7 +167,9 @@ bool __attribute__((nonnull)) q_pop(Queue_t *const pQ, void *const record)
 	} // No more records
 
 	while (pQ->lock)
-		;
+	{
+		pull_wait++;
+	}
 	pQ->lock = 1;
 	if (pQ->impl == FIFO)
 	{

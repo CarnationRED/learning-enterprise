@@ -1,8 +1,11 @@
 #include "msg.h"
 #include "can.h"
 #include "mqtt.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 MSG_STATS msgStats;
+int recvedMsgs = 0;
 extern CAN_STATS canStats;
 typedef struct _ReportMsg
 {
@@ -47,7 +50,10 @@ void dataDown(int len, u8 *data)
                 if (head->dataLen == head->elementSize * head->elementCount)
                 {
                     if (canSendPtr != NULL)
+                    {
                         canSendPtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)));
+                        recvedMsgs++;
+                    }
                     // canSendOneFrame((CAN_CMD_FRAME *)ptr);
                 }
                 else
@@ -57,10 +63,24 @@ void dataDown(int len, u8 *data)
                 if (head->dataLen == head->elementSize * head->elementCount)
                 {
                     if (canSendPtr != NULL)
-                        for (size_t i = 0; i < head->elementCount; i++)
+                    {
+                        volatile int t = xTaskGetTickCount();
+                        CAN_CMD_FRAME msg;
+                        CAN_CMD_MULTIFRAME *frames = (CAN_CMD_MULTIFRAME *)(ptr + sizeof(DataDownMsg));
+                        u8 dlc = frames->txObj.bF.ctrl.DLC;
+                        msg.txObj = frames->txObj;
+                        msg.channel = frames->channel;
+                        u8 *d = frames->data;
+                        for (size_t i = 0; i < frames->frames; i++)
                         {
-                            canSendPtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)+ i * head->elementSize));
+                            memcpy(msg.data, d, dlc);
+                            canSendPtr(&msg);
+                            d += dlc;
                         }
+                        recvedMsgs += frames->frames;
+                        t = xTaskGetTickCount() - t;
+                        msg.channel = t;
+                    }
                     // canSendOneFrame((CAN_CMD_FRAME *)ptr);
                 }
                 else

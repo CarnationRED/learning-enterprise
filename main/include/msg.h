@@ -97,7 +97,7 @@ typedef struct
 {
     CAN_TX_MSGOBJ txObj;
     u8 channel;
-    u16 frames;
+    u8 frames;
     u8 data[1408];
 } CAN_CMD_MULTIFRAME;
 
