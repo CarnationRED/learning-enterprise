@@ -170,10 +170,10 @@ void cleanAllPrt()
 //     wifiStats = WIFI_STAT_INIT;
 // }
 
-/// @brief can't reference canSendOneFrame here, so a pointer canSendPtr is defined to solve the bug
+/// @brief can't reference canSendOneFrame here, so a pointer canQueuePtr is defined to solve the bug
 /// @param msg
 /// @return
-// bool (*canSendPtr)(CAN_CMD_FRAME *msg) = NULL;
+// bool (*canQueuePtr)(CAN_CMD_FRAME *msg) = NULL;
 // bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt) = NULL;
 // void taskDataDown()
 // {
@@ -194,8 +194,8 @@ void cleanAllPrt()
 //                     case SINGLE_FRAME:
 //                         if (head->dataLen == head->elementSize * head->elementCount)
 //                         {
-//                             if (canSendPtr != NULL)
-//                                 canSendPtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)));
+//                             if (canQueuePtr != NULL)
+//                                 canQueuePtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)));
 //                             // canSendOneFrame((CAN_CMD_FRAME *)ptr);
 //                         }
 //                         else

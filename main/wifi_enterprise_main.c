@@ -113,7 +113,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             sprintf(thisIp, IPSTR, IP2STR(&ip.ip));
             sprintf(thisMask, IPSTR, IP2STR(&ip.netmask));
             sprintf(thisGw, IPSTR, IP2STR(&ip.gw));
-
+            
             mqtt_start();
             /* printf("~~~~~~~~~~~");
              printf("IP:%s\n", thisIp);

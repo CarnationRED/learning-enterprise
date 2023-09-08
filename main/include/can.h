@@ -3,14 +3,19 @@
 #include "msg.h"
 #include "fifo.h"
 #include "cQueue.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_system.h"
 
 
 void spitest();
 void can_init();
 void APP_CANFDSPI_Init(void *p);
 static bool canEnqueueOneFrame(CAN_CMD_FRAME * msg);
+static bool canEnqueueMultiFrame(CAN_CMD_MULTIFRAME * msg);
 static bool canSendOneFrame(CAN_CMD_FRAME * msg);
 static bool canSetFilter(CAN_FILTER_CFG *flt);
+static bool canSetCanChl(u8 *channel);
 
 typedef enum
 {
@@ -25,6 +30,6 @@ typedef enum
     CAN_STAT_DATAERROR,
 } CAN_STATS;
 
-extern Queue_t rxMsgFifo;
+// extern QueueHandle_t rxMsgFifo;
 extern u8 canCurrentChannel;
 #endif

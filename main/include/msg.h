@@ -17,7 +17,11 @@ typedef enum _DataDownMsgType
 {
     SINGLE_FRAME = 0,
     MULTI_FRAMES = 1,
-    SET_FILTER = 2,
+    CAN_STOP,
+    CAN_START,
+    SET_FILTER,
+    SET_CANCHL,
+    KEEP_ALIVE,
     UNDEFINED = 0xff
 } DataDownMsgType;
 /// @brief DownData Structure: [DataDownMsg][DataStruct0][DataStruct1][DataStruct2]...
@@ -127,4 +131,5 @@ typedef enum
 } MSG_STATS;
 
 void msg_init();
+void report(char* msg);
 #endif // !__MSG_H__

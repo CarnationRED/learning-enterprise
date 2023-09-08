@@ -4,6 +4,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+// #include "msg.h"
+// #include "can.h"
+// #include "freertos/queue.h"
+
+// extern QueueHandle_t txMultiMsgFifo;
+
 MSG_STATS msgStats;
 int recvedMsgs = 0;
 extern CAN_STATS canStats;
@@ -17,6 +23,7 @@ typedef struct _ReportMsg
     DataDownMsgType responseType; // 4
     MSG_STATS msgStats;           // 4
     CAN_STATS canStats;           // 4
+    char msg[32];                 // 33
 } ReportMsg;
 
 u8 rptBuffer[sizeof(ReportMsg) + 1];
@@ -27,17 +34,22 @@ ReportMsg *resportMsgInit()
     msg->msgStats = msgStats;
     msg->canStats = canStats;
     msg->responseType = 0xff;
+    msg->msg[32] = '\0';
     return msg;
 }
 /// @brief can't reference canSendOneFrame here, so canSendPtr is defined to solve this
 /// @param msg
 /// @return
-bool (*canSendPtr)(CAN_CMD_FRAME *msg);
+bool (*canQueuePtr)(CAN_CMD_FRAME *msg);
+bool (*canQueueMultiPtr)(CAN_CMD_MULTIFRAME *msgs);
 bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt);
+bool (*canSetCanChlPtr)(u8 *channel);
 extern void (*dataDownHandler)(int len, uint8_t *data);
 extern void (*dataCtrlHandler)(int len, uint8_t *data);
-void dataDown(int len, u8 *data)
+static CAN_CMD_MULTIFRAME *frames;
+static void dataDown(int len, u8 *data)
 {
+
     if (len >= sizeof(DataDownMsg))
     {
         uint8_t *ptr = data;
@@ -49,9 +61,9 @@ void dataDown(int len, u8 *data)
             case SINGLE_FRAME:
                 if (head->dataLen == head->elementSize * head->elementCount)
                 {
-                    if (canSendPtr != NULL)
+                    if (canQueuePtr != NULL)
                     {
-                        canSendPtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)));
+                        canQueuePtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)));
                         recvedMsgs++;
                     }
                     // canSendOneFrame((CAN_CMD_FRAME *)ptr);
@@ -62,24 +74,25 @@ void dataDown(int len, u8 *data)
             case MULTI_FRAMES:
                 if (head->dataLen == head->elementSize * head->elementCount)
                 {
-                    if (canSendPtr != NULL)
+                    if (canQueueMultiPtr != NULL)
                     {
                         volatile int t = xTaskGetTickCount();
-                        CAN_CMD_FRAME msg;
-                        CAN_CMD_MULTIFRAME *frames = (CAN_CMD_MULTIFRAME *)(ptr + sizeof(DataDownMsg));
-                        u8 dlc = frames->txObj.bF.ctrl.DLC;
-                        msg.txObj = frames->txObj;
-                        msg.channel = frames->channel;
-                        u8 *d = frames->data;
-                        for (size_t i = 0; i < frames->frames; i++)
-                        {
-                            memcpy(msg.data, d, dlc);
-                            canSendPtr(&msg);
-                            d += dlc;
-                        }
+                        // CAN_CMD_FRAME msg;
+                        frames = (CAN_CMD_MULTIFRAME *)(ptr + sizeof(DataDownMsg));
+                        // u8 dlc = frames->txObj.bF.ctrl.DLC;
+                        // msg.txObj = frames->txObj;
+                        // msg.channel = frames->channel;
+                        // u8 *d = frames->data;
+                        // for (size_t i = 0; i < frames->frames; i++)
+                        // {
+                        //     memcpy(msg.data, d, dlc);
+                        //     canQueuePtr(&msg);
+                        //     d += dlc;
+                        // }
+                        canQueueMultiPtr(frames);
                         recvedMsgs += frames->frames;
                         t = xTaskGetTickCount() - t;
-                        msg.channel = t;
+                        // msg.channel = t;
                     }
                     // canSendOneFrame((CAN_CMD_FRAME *)ptr);
                 }
@@ -123,7 +136,23 @@ void dataCtrl(int len, u8 *data)
                     msgStats = MSG_DATALEN_MISMATCH;
                 msg->responseType = SET_FILTER;
                 break;
-
+            case SET_CANCHL:
+                if (head->dataLen == head->elementSize * head->elementCount)
+                {
+                    if (canSetCanChlPtr != NULL)
+                    {
+                        success = true;
+                        success &= canSetCanChlPtr((u8 *)(ptr + sizeof(DataDownMsg)));
+                    }
+                    // canSendOneFrame((CAN_CMD_FRAME *)ptr);
+                }
+                else
+                    msgStats = MSG_DATALEN_MISMATCH;
+                msg->responseType = SET_CANCHL;
+                break;
+            case KEEP_ALIVE:
+                mqtt_report_pulish("pingok", 0);
+                return;
             default:
                 msgStats = MSG_DATA_FORMAT_ERROR;
                 break;
@@ -132,6 +161,15 @@ void dataCtrl(int len, u8 *data)
             mqtt_report_pulish((char *)rptBuffer, sizeof(ReportMsg) + 1);
         }
     }
+}
+void report(char *msg)
+{
+    ReportMsg *m = resportMsgInit();
+    u8 len = strlen(msg);
+    if (len > 31)
+        len = 31;
+    memcpy(m->msg, msg, len);
+    mqtt_report_pulish((char *)rptBuffer, sizeof(ReportMsg) + 1);
 }
 void msg_init()
 {

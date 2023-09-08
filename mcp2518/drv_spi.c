@@ -70,7 +70,7 @@ OF SUCH DAMAGE.
 
 static spi_device_handle_t spi = NULL;
 // static QueueHandle_t gpio_evt_queue = NULL;
-void (*spican_rx_int_ptr)(void *para) = NULL;
+void (*spican_rx_int_ptr)(uint8_t para) = NULL;
 
 /* Local function prototypes */
 inline void spi_master_init(void);
@@ -99,7 +99,7 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
   // int io_num = gpio_num & 0x00FFFFFF;
   // printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level((gpio_num_t)io_num));
   if (spican_rx_int_ptr != NULL)
-    (*spican_rx_int_ptr)((void *)(canCurrentChannel));
+    (*spican_rx_int_ptr)((canCurrentChannel));
 }
 
 void DRV_SPI_Initialize(void)

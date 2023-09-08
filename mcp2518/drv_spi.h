@@ -63,6 +63,6 @@ void DRV_SPI_Initialize(void);
 
 int8_t DRV_SPI_TransferData(uint8_t spiSlaveDeviceIndex, uint8_t *SpiTxData, uint8_t *SpiRxData, uint16_t spiTransferSize);
 
-extern void (*spican_rx_int_ptr)(void* para);
+extern void (*spican_rx_int_ptr)(uint8_t para);
 
 #endif	// _DRV_SPI_H

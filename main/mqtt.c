@@ -5,7 +5,6 @@
 #include "lwip/dns.h"
 #include "lwip/netdb.h"
 #include "esp_wifi.h"
-
 #include "esp_log.h"
 #include "mqtt_client.h"
 #include "mqtt.h"
@@ -49,6 +48,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
     mqttconnected=true;
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+
         msg_id = esp_mqtt_client_publish(client, trprt, "VCI logged on", 0, 2, 1);
         ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
 
@@ -89,9 +89,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         // ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
         break;
     case MQTT_EVENT_DATA:
-        // ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        // printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        // printf("DATA=%.*s\r\n", event->data_len, event->data);
+        //  ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+
+        //  printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+        //  printf("DATA=%.*s\r\n", event->data_len, event->data);
         if (strncmp(event->topic, tdown, strlen(tdown))==0 && dataDownHandler != NULL)
         {
             dataDownHandler(event->data_len, (uint8_t *)event->data);
@@ -129,7 +130,7 @@ static void mqtt_app_start(void)
     subscribed = false;
     esp_mqtt_client_config_t mqtt_cfg = {
         .session.protocol_ver = MQTT_PROTOCOL_V_3_1_1,
-        .broker.address.uri = "mqtt://esp32s3:pwd@192.168.137.55:2222",
+        .broker.address.uri = "mqtt://esp32s3:pwd@192.168.4.2:2222",
         // .session.keepalive = 2, // 1s
         .session.disable_keepalive = false, // 1s
         // .broker.address.port = 2222,
