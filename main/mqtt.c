@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "mqtt_client.h"
 #include "mqtt.h"
+#include "led.h"
 
 static const char *TAG = "MQTT_EXAMPLE";
 #define tup "/topic/up"
@@ -46,7 +47,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch ((esp_mqtt_event_id_t)event_id)
     {
     case MQTT_EVENT_CONNECTED:
-    mqttconnected=true;
+        mqttconnected = true;
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
 
         msg_id = esp_mqtt_client_publish(client, trprt, "VCI logged on", 0, 2, 1);
@@ -70,6 +71,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         // esp_mqtt_client_disconnect(client);
         esp_wifi_disconnect();
         esp_wifi_connect();
+        led1Flash2(15, 0xffffffff, 95);
         //  esp_mqtt_client_stop(client);
         //  esp_mqtt_client_start(client);
         subscribed = false;
@@ -78,7 +80,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
         msg_id = esp_mqtt_client_publish(client, trprt, "VCI topic subscribed", 0, 0, 0);
-        ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
+        led1Flash2(15, 0, 0);
+        led1Switch(true);
         subscribed = true;
         break;
     case MQTT_EVENT_UNSUBSCRIBED:
@@ -93,16 +96,17 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         //  printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
         //  printf("DATA=%.*s\r\n", event->data_len, event->data);
-        if (strncmp(event->topic, tdown, strlen(tdown))==0 && dataDownHandler != NULL)
+        if (strncmp(event->topic, tdown, strlen(tdown)) == 0 && dataDownHandler != NULL)
         {
             dataDownHandler(event->data_len, (uint8_t *)event->data);
         }
-        else if (strncmp(event->topic, tctrl, strlen(tctrl))==0 && dataCtrlHandler != NULL)
+        else if (strncmp(event->topic, tctrl, strlen(tctrl)) == 0 && dataCtrlHandler != NULL)
         {
             dataCtrlHandler(event->data_len, (uint8_t *)event->data);
         }
-        else{
-            subscribed =true;
+        else
+        {
+            subscribed = true;
         }
         break;
     case MQTT_EVENT_ERROR:
@@ -120,6 +124,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     }
 }
+static char *uriFmt = "mqtt://DfMiniBox%2x%2x%2x:ESP32S3N8R8@192.168.4.2:2222";
+static char *uri = "mqtt://DfMiniBox123456:ESP32S3N8R8@192.168.4.2:2222";
 static void mqtt_app_start(void)
 {
     if (client)
@@ -128,13 +134,18 @@ static void mqtt_app_start(void)
         esp_mqtt_client_destroy(client);
     }
     subscribed = false;
+
+    uint8_t mac[6];
+    esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+    sprintf(uri, uriFmt, mac[3], mac[4], mac[5]);
+
     esp_mqtt_client_config_t mqtt_cfg = {
         .session.protocol_ver = MQTT_PROTOCOL_V_3_1_1,
-        .broker.address.uri = "mqtt://esp32s3:pwd@192.168.4.2:2222",
+        .broker.address.uri = uri,
         // .session.keepalive = 2, // 1s
         .session.disable_keepalive = false, // 1s
         // .broker.address.port = 2222,
-        .task.priority=10,
+        .task.priority = 10,
         .buffer.size = 16384,
         .buffer.out_size = 16384,
     };
@@ -151,14 +162,14 @@ void mqtt_dataUp_pulish(char *data, int len)
 {
     int msg_id;
     msg_id = esp_mqtt_client_publish(client, tup, data, len, 0, 0);
-    //ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
+    // ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
 }
 
 void mqtt_report_pulish(char *data, int len)
 {
     int msg_id;
     msg_id = esp_mqtt_client_publish(client, trprt, data, len, 2, 0);
-    //ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
+    // ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
 }
 
 #endif // !__MQTT_C__

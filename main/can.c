@@ -19,6 +19,7 @@
 #include "esp_system.h"
 #include "mqtt.h"
 #include "cQueue.h"
+#include "led.h"
 extern int push_wait;
 extern int pull_wait;
 extern int recvedMsgs;
@@ -37,12 +38,8 @@ CAN_STATS canStats = CAN_STAT_INIT;
 #define CH444G_SW0 36
 #define CH444G_SW1 35
 #define CH444G_SWEN 45
-#define SWENABLE()                 \
-    gpio_pulldown_en(CH444G_SWEN); \
-    gpio_pulldown_dis(CH444G_SWEN)
-#define SWDISABLE()                    \
-    gpio_pulldown_dis(CH444G_SWEN, 1); \
-    gpio_pullup_en(CH444G_SWEN)
+#define SWENABLE() gpio_pullup_en(CH444G_SWEN)
+#define SWDISABLE() gpio_pulldown_en(CH444G_SWEN)
 #define SW0_0() gpio_set_level(CH444G_SW0, 0)
 #define SW1_0() gpio_set_level(CH444G_SW1, 0)
 #define SW0_1() gpio_set_level(CH444G_SW0, 1)
@@ -77,14 +74,14 @@ static REG_CiFLTOBJ fObj;
 static REG_CiMASK mObj;
 static CAN_RX_FIFO_EVENT rxFlags;
 
-static TaskHandle_t txHandle, rxHandle, wifiHandle;
+static TaskHandle_t txHandle, rxHandle, wifiSendHandle;
 QueueHandle_t rxMsgFifo;
 QueueHandle_t txMsgFifo;
 QueueHandle_t txMultiMsgFifo;
 QueueSetHandle_t txFifoSet;
 static CAN_MSG_FRAME msg = {};
 uint8_t canSendWifiTxBuffer[16384];
-int wifiSent = 0, canSent = 0;
+long wifiSent = 0, canSent = 0;
 
 extern void (*spican_rx_int_ptr)(u8 para);
 extern bool (*canQueuePtr)(CAN_CMD_FRAME *msg);
@@ -206,10 +203,11 @@ static void task_canrx()
             if (count == 12)
             {
                 count = 0;
-                xTaskNotifyGive(wifiHandle);
+                xTaskNotifyGive(wifiSendHandle);
             }
         }
-        xTaskNotifyGive(wifiHandle);
+        xTaskNotifyGive(wifiSendHandle);
+        vPortYield();
     }
 }
 static void task_cantx()
@@ -328,33 +326,44 @@ static void task_can2wifi()
 }
 static void task_dbg_print()
 {
-    int lastWifiSent = 0;
-    int lastCanSent = 0;
-    int t0 = canSent;
-    int t1 = wifiSent;
+    long lastWifiSent = 0;
+    long lastCanSent = 0;
+    long t0 = canSent;
+    long t1 = wifiSent;
+    // Idle counter
     u8 times = 0;
     while (1)
     {
+        // No activities
         if (t0 + t1 != 0 && canSent - t0 == 0 && wifiSent - t1 == 0)
         {
             times++;
         }
+        // Reset idle counter
         else
         {
             t0 = canSent;
             t1 = wifiSent;
             times = 0;
+
+            // flash led2
+            if (t0 + t1 > 0)
+                led2Flash2(8, 0xffffffff, 100);
         }
+        // Idle time > 1s and transmission happened
         if (times == 2 && wifiSent - lastWifiSent + canSent - lastCanSent != 0)
         {
             times = 0;
-            ESP_LOGI("wifi sent", "%d\tcan sent:%d\n     Free Heap: %dKB\n     pushwait:%d\tpullwait:%d\trecvedMsgs:%d", wifiSent - lastWifiSent, canSent - lastCanSent, xPortGetFreeHeapSize() / 1024, push_wait, pull_wait, recvedMsgs);
+            ESP_LOGI("wifi sent", "%d\tcan sent:%d\n     Free Heap: %dKB\n     pushwait:%d\tpullwait:%d\trecvedMsgs:%d", (int) (wifiSent - lastWifiSent),(int) (canSent - lastCanSent), xPortGetFreeHeapSize() / 1024, push_wait, pull_wait, recvedMsgs);
             lastWifiSent = wifiSent;
             lastCanSent = canSent;
 
             push_wait = 0;
             pull_wait = 0;
+            // led2 stop flash
+            led2Flash2(10, 0, 0);
         }
+        vPortYield();
         vTaskDelay(500);
     }
 }
@@ -375,16 +384,16 @@ void can_init()
     txFifoSet = xQueueCreateSet(32 + 16 + 100);
     xQueueAddToSet(txMsgFifo, txFifoSet);
     xQueueAddToSet(txMultiMsgFifo, txFifoSet);
-    xTaskCreatePinnedToCore(task_canrx, "task_canrx", 4096, NULL, 24, &rxHandle, 1);
+    xTaskCreatePinnedToCore(task_canrx, "task_canrx", 4096, NULL, 12, &rxHandle, 1);
     xTaskCreatePinnedToCore(task_cantx, "task_cantx", 4096, NULL, 24, &txHandle, 1);
-    xTaskCreatePinnedToCore(task_can2wifi, "task_can2wifi", 4096, NULL, 12, &wifiHandle, 0);
+    xTaskCreatePinnedToCore(task_can2wifi, "task_can2wifi", 4096, NULL, 12, &wifiSendHandle, 0);
     xTaskCreatePinnedToCore(task_dbg_print, "task_dbg_print", 2048, NULL, 0, NULL, 0);
 }
 void can_clearFilter()
 {
     CAN_FILTER_CFG c;
     c.enabled = false;
-    ESP_LOGI("can","clear filter");
+    ESP_LOGI("can", "clear filter");
     for (size_t i = 0; i < 32; i++)
     {
         c.filterId = i;
