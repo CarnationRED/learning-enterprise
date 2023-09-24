@@ -107,6 +107,31 @@ typedef struct
 
 typedef struct
 {
+    CAN_TX_MSGOBJ txObj;
+    CAN_TX_MSGOBJ rxObj;
+    u16 dataLen;
+    u8 channel;
+    u8 data[4096];
+} CAN_CMD_UDSFRAME;
+
+typedef struct
+{
+    CAN_RX_MSGOBJ rxObj;
+    u16 dataLen;
+    u8 channel;
+    u8 data[4096];
+} CAN_MSG_UDSFRAME;
+
+typedef struct
+{
+    CAN_TX_MSGOBJ txObj;
+    u8 channel;
+    u16 dataLen;
+    u8 data[64];
+} CAN_CMD_UDSFRAME_S;
+
+typedef struct
+{
     CAN_FILTEROBJ_ID fObj; // 4 bytes
     CAN_MASKOBJ_ID mObj;   // 4 bytes
     u8 filterId;           // 1
@@ -119,8 +144,10 @@ typedef struct
 {
     CAN_RX_MSGOBJ rxObj;
     u8 channel;
+    u8 direction;//0:Receive,1:Send
     u8 data[64];
 } CAN_MSG_FRAME;
+
 
 typedef enum
 {

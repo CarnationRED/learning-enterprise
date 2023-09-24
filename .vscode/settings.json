@@ -1,7 +1,7 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
   "idf.adapterTargetName": "esp32s3",
-  "idf.portWin": "COM12",
+  "idf.portWin": "COM7",
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
@@ -64,6 +64,7 @@
     "ch395inc.h": "c",
     "spi_master.h": "c",
     "doip.h": "c",
-    "led.h": "c"
+    "led.h": "c",
+    "cstddef": "c"
   }
 }
