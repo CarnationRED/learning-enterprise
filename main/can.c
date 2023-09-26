@@ -74,9 +74,9 @@ static REG_CiFLTOBJ fObj;
 static REG_CiMASK mObj;
 static CAN_RX_FIFO_EVENT rxFlags;
 
-#define RX_MSGLEN 1000
+#define RX_MSGLEN 400
 #define TX_MSGLEN 32
-#define TX_MULTIMSGLEN 16
+#define TX_MULTIMSGLEN 4
 static TaskHandle_t txHandle, rxHandle;
 //handle to use in canrx, should be set to one of wifiSendHandle and udsSendHandle
 TaskHandle_t canRxHandle;

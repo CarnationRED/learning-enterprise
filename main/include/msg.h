@@ -93,6 +93,16 @@ typedef union _CAN_TX_MSGOBJ {
 
 typedef struct
 {
+    CAN_FILTEROBJ_ID fObj; // 4 bytes
+    CAN_MASKOBJ_ID mObj;   // 4 bytes
+    u8 filterId;           // 1
+    u8 enabled;            // 1
+    u8 reserved0;          // 1
+    u8 reserved1;          // 1
+} CAN_FILTER_CFG;
+
+typedef struct
+{
     CAN_TX_MSGOBJ txObj;
     u8 channel;
     u8 data[64];
@@ -136,15 +146,6 @@ typedef struct
 //     u8 data[64];
 // } CAN_CMD_UDSFRAME_S;
 
-typedef struct
-{
-    CAN_FILTEROBJ_ID fObj; // 4 bytes
-    CAN_MASKOBJ_ID mObj;   // 4 bytes
-    u8 filterId;           // 1
-    u8 enabled;            // 1
-    u8 reserved0;          // 1
-    u8 reserved1;          // 1
-} CAN_FILTER_CFG;
 
 typedef struct
 {

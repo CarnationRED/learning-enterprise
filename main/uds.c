@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_system.h"
+#include "esp_private/esp_clk.h"
 #include "freertos/queue.h"
 #include "can.h"
 #include "msg.h"
@@ -18,7 +19,7 @@
 #define UDSSID ("uds sid %s")
 #define UDSREQ ("uds req %s")
 
-#define ERRMSGFMT(__fmt__, s) sprintf((result.errorMessage), __fmt__, (s))
+#define ERRMSGFMT(__fmt__, s) sprintf((char *)(result.errorMessage), __fmt__, (s))
 #define ERRMSG(s) sprintf((result.errorMessage), (s))
 
 #define null NULL
@@ -162,13 +163,13 @@ void parseSingleFrame(int udsSid, FrameData *frame, CAN_MSG_UDSFRAME *resultMsg,
     if (frame->data[1] == 0x7F)
     {
         result->nrc = frame->data[3];
-        sprintf((char *)&result->errorMessage, "NRC:%2x", result->nrc);
+        sprintf((char *)result->errorMessage, "NRC:%2x", result->nrc);
         resultMsg->dataLen = 0;
         return;
     }
     if (udsSid + 0x40 != frame->data[1])
     {
-        sprintf((char *)&result->errorMessage, "wrong sid:%2x, expected:%2x", frame->data[1], udsSid + 0x40);
+        sprintf((char *)result->errorMessage, "wrong sid:%2x, expected:%2x", frame->data[1], udsSid + 0x40);
         resultMsg->dataLen = 0;
         return;
     }
@@ -231,38 +232,39 @@ bool logAndSendFrame(FrameData *frame)
         return false;
     }
 }
-bool setAndFilterSendRecvAddress(CAN_CMD_UDSFRAME *request)
-{
-    can_clearFilter();
-    CAN_FILTER_CFG f = {
-        .enabled = 1,
-        .fObj.SID = request->txObj.bF.id.SID,
-        .fObj.SID11 = request->txObj.bF.id.SID11,
-        .fObj.EID = request->txObj.bF.id.EID,
-        .fObj.EXIDE = request->txObj.bF.ctrl.IDE,
+// bool setAndFilterSendRecvAddress(CAN_CMD_UDSFRAME *request)
+// {
+//     can_clearFilter();
+//     CAN_FILTER_CFG f = {
+//         .enabled = 1,
+//         .fObj.SID = request->txObj.bF.id.SID,
+//         .fObj.SID11 = request->txObj.bF.id.SID11,
+//         .fObj.EID = request->txObj.bF.id.EID,
+//         .fObj.EXIDE = request->txObj.bF.ctrl.IDE,
 
-        .mObj.MSID = 0x7ff,
-        .mObj.MSID11 = 1,
-        .mObj.MIDE = 1,
-        .filterId = 0,
-    };
-    bool s = canSetFilterPtr(&f);
-    f.filterId = 1;
-    f.fObj.SID = request->rxObj.bF.id.SID,
-    f.fObj.SID11 = request->rxObj.bF.id.SID11,
-    f.fObj.EID = request->rxObj.bF.id.EID,
-    f.fObj.EXIDE = request->rxObj.bF.ctrl.IDE,
-    s = s && canSetFilterPtr(&f);
-    if (!s)
-        report("uds flt fail");
-    return s;
-}
+//         .mObj.MSID = 0x7ff,
+//         .mObj.MSID11 = 1,
+//         .mObj.MIDE = 1,
+//         .filterId = 0,
+//     };
+//     bool s = canSetFilterPtr(&f);
+//     f.filterId = 1;
+//     f.fObj.SID = request->rxObj.bF.id.SID,
+//     f.fObj.SID11 = request->rxObj.bF.id.SID11,
+//     f.fObj.EID = request->rxObj.bF.id.EID,
+//     f.fObj.EXIDE = request->rxObj.bF.ctrl.IDE,
+//     s = s && canSetFilterPtr(&f);
+//     if (!s)
+//         report("uds flt fail");
+//     return s;
+// }
 
 UDSResult udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 {
     canRxHandle = udsSendHandle;
-    do_udsRequest(request, response);
+    UDSResult r = do_udsRequest(request, response);
     canRxHandle = wifiSendHandle;
+    return r;
 }
 UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 {
@@ -274,7 +276,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 
     response->dataLen = 0;
 
-    if (request->data == null || !request->dataLen)
+    if (!request->dataLen)
     {
         report("uds req empty");
         return result;
@@ -300,12 +302,12 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 
         frame.data[0] = (u8)((first2Bytes & 0xFF00) >> 8);
         frame.data[1] = (u8)(first2Bytes & 0x00FF);
-        for (u8 i = 0; i < 6; frame.data[i + 2] = requestData[i++])
-            ;
+        for (u8 i = 0; i < 6;i++)
+         frame.data[i + 2] = requestData[i];
 
         u8 *dataCurrentPos = requestData[6 + 1];
         // 发送首帧
-        if (LogAndSendFrame(frame))
+        if (logAndSendFrame(&frame))
         {
             // sent frames count
             u32 sent = 6;
@@ -352,7 +354,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                                 frame.data[1 + i] = *(dataCurrentPos++);
                             }
 
-                            if (!LogAndSendFrame(frame))
+                            if (!logAndSendFrame(&frame))
                             {
                                 ERRMSGFMT(UDSSEND, "fail");
                                 result.success = false;
@@ -427,7 +429,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
         memcpy(frame.data + 1, request->data, request->dataLen);
 
         // 发送一帧
-        if (LogAndSendFrame(frame))
+        if (logAndSendFrame(&frame))
         {
             result.success = false;
             bool isECUBusy = true;

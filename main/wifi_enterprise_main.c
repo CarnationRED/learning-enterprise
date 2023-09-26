@@ -120,7 +120,14 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             sprintf(thisGw, IPSTR, IP2STR(&ip.gw));
 
             led1Flash2(15, 0xffffffff, 95);
+            ESP_LOGI(TAG,"spi  heap:\t%ld KB",esp_get_free_heap_size()/1024);
+            ESP_LOGI(TAG,"rtos heap:\t%d KB\n",xPortGetFreeHeapSize()/1024);
+            vTaskDelay(20);
+            ESP_LOGI(TAG,"spi  heap:\t%ld KB",esp_get_free_heap_size()/1024);
+            ESP_LOGI(TAG,"rtos heap:\t%d KB\n",xPortGetFreeHeapSize()/1024);
             mqtt_start();
+            ESP_LOGI(TAG,"spi  heap:\t%ld KB",esp_get_free_heap_size()/1024);
+            ESP_LOGI(TAG,"rtos heap:\t%d KB\n",xPortGetFreeHeapSize()/1024);
             /* printf("~~~~~~~~~~~");
              printf("IP:%s\n", thisIp);
              // printf("Startup: sys(%ldms) app(%ldms)", t_sysInit * 10, (t_staInit - t_sysInit) * 10);
@@ -183,7 +190,7 @@ void initialise_wifi(void)
     ESP_ERROR_CHECK(esp_wifi_sta_wpa2_ent_enable());
     ESP_ERROR_CHECK(esp_wifi_start());
     t_staConfig = xTaskGetTickCount();
-    vTaskDelay(200);
+    vTaskDelay(2);
     vTaskDelete(NULL);
 }
 #define WIFI_CONNECTED_BIT BIT0
@@ -266,9 +273,8 @@ void initialise_wifi_noneEnt(void)
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
     t_staConfig = xTaskGetTickCount();
-    vTaskDelay(2000);
+    vTaskDelay(2);
     vTaskDelete(NULL);
-    vTaskDelay(2000);
 }
 
 extern void spitest();
@@ -295,6 +301,7 @@ void app_main(void)
     can_init();
     msg_init();
     uds_init();
+
 
     //    volatile int s1 = sizeof(CAN_TX_MSGOBJ);
     //    volatile int s2 = sizeof(CAN_MSGOBJ_ID);
