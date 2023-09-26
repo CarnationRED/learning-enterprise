@@ -40,6 +40,7 @@
 #include "mqtt.h"
 #include "task.h"
 #include "led.h"
+#include "uds.h"
 
 /* The examples use simple WiFi configuration that you can set via
    project configuration menu.
@@ -293,6 +294,7 @@ void app_main(void)
     led_init2();
     can_init();
     msg_init();
+    uds_init();
 
     //    volatile int s1 = sizeof(CAN_TX_MSGOBJ);
     //    volatile int s2 = sizeof(CAN_MSGOBJ_ID);

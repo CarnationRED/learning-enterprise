@@ -77,26 +77,18 @@ static CAN_RX_FIFO_EVENT rxFlags;
 #define RX_MSGLEN 1000
 #define TX_MSGLEN 32
 #define TX_MULTIMSGLEN 16
-#define TX_UDSLEN 16
-#define TX_UDSMULTILEN 100
 static TaskHandle_t txHandle, rxHandle;
-//handle to use in canrx, should be set to one of wifiSendHandle and wifiSendHandle
+//handle to use in canrx, should be set to one of wifiSendHandle and udsSendHandle
 TaskHandle_t canRxHandle;
 //handle of wifiSend task
 TaskHandle_t wifiSendHandle;
-//handle of udsRequest task
-TaskHandle_t udsRecvHandle;
+//handle of udsSend task
+TaskHandle_t udsSendHandle;
 QueueHandle_t rxMsgFifo;
 QueueHandle_t txMsgFifo;
 QueueHandle_t txMultiMsgFifo;
 QueueSetHandle_t txFifoSet;
 
-QueueHandle_t txUDSFifo;
-QueueHandle_t txUDSMultiFifo;
-u8 *udsBuffer;
-u8 *udsMultiBuffer;
-StaticQueue_t udsStack;
-StaticQueue_t udsMultiStack;
 
 static CAN_MSG_FRAME msg = {};
 uint8_t canSendWifiTxBuffer[16384];
@@ -268,9 +260,6 @@ static void task_cantx()
                 }
             }
         }
-        else if (q == txUDSFifo)
-        {
-        }
         else
         {
             canErrStr = "fifo name error";
@@ -387,16 +376,10 @@ void can_init()
     txMsgFifo = xQueueCreate(TX_MSGLEN, sizeof(CAN_CMD_FRAME));
     txMultiMsgFifo = xQueueCreate(TX_MULTIMSGLEN, sizeof(CAN_CMD_MULTIFRAME));
 
-    udsBuffer = (uint8_t *)heap_caps_malloc(TX_UDSLEN * sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
-    udsMultiBuffer = (uint8_t *)heap_caps_malloc(TX_UDSMULTILEN * sizeof(CAN_CMD_UDSMULTIFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
-    txUDSFifo = xQueueCreateStatic(TX_UDSLEN, sizeof(CAN_CMD_UDSFRAME), udsBuffer, &udsStack);
-    txUDSMultiFifo = xQueueCreateStatic(TX_UDSMULTILEN, sizeof(CAN_CMD_UDSMULTIFRAME), udsMultiBuffer, &udsMultiStack);
 
-    txFifoSet = xQueueCreateSet(TX_MSGLEN + TX_MULTIMSGLEN + TX_UDSMULTILEN + TX_UDSLEN + 10);
+    txFifoSet = xQueueCreateSet(TX_MSGLEN + TX_MULTIMSGLEN + 10);
     xQueueAddToSet(txMsgFifo, txFifoSet);
     xQueueAddToSet(txMultiMsgFifo, txFifoSet);
-    xQueueAddToSet(txUDSFifo, txFifoSet);
-    xQueueAddToSet(txUDSMultiFifo, txFifoSet);
 
     xTaskCreatePinnedToCore(task_canrx, "task_canrx", 4096, NULL, 12, &rxHandle, 1);
     xTaskCreatePinnedToCore(task_cantx, "task_cantx", 4096, NULL, 24, &txHandle, 1);

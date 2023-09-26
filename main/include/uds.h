@@ -11,7 +11,7 @@ typedef struct
 {
     bool success;
     u8 nrc;
-    u8 errorMessage[32];
+    u8 *errorMessage;
 }UDSResult;
 
 u8 NRCs[46]={
@@ -62,3 +62,5 @@ u8 NRCs[46]={
 	0x92,//VTH(VoltageTooHigh)                                
 	0x93,//VTL(VoltageTooLow)                                 
 };
+
+void uds_init();

@@ -17,6 +17,7 @@ typedef enum _DataDownMsgType
 {
     SINGLE_FRAME = 0,
     MULTI_FRAMES = 1,
+    UDS_FRAMES,
     CAN_STOP,
     CAN_START,
     SET_FILTER,
@@ -108,7 +109,7 @@ typedef struct
 typedef struct
 {
     CAN_TX_MSGOBJ txObj;
-    CAN_TX_MSGOBJ rxObj;
+    CAN_FILTER_CFG filter;
     u16 dataLen;
     u8 channel;
     u8 data[4096];
@@ -119,16 +120,21 @@ typedef struct
     CAN_RX_MSGOBJ rxObj;
     u16 dataLen;
     u8 channel;
+
+    u8 success;
+    u8 nrc;
+    u8 errorMessage[32];
+
     u8 data[4096];
 } CAN_MSG_UDSFRAME;
 
-typedef struct
-{
-    CAN_TX_MSGOBJ txObj;
-    u8 channel;
-    u16 dataLen;
-    u8 data[64];
-} CAN_CMD_UDSFRAME_S;
+// typedef struct
+// {
+//     CAN_TX_MSGOBJ txObj;
+//     u8 channel;
+//     u16 dataLen;
+//     u8 data[64];
+// } CAN_CMD_UDSFRAME_S;
 
 typedef struct
 {

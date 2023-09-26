@@ -10,6 +10,8 @@
 #include "can.h"
 #include "msg.h"
 
+#define TX_UDSMSGNUM 100
+
 #define UDSSEND ("uds send %s")
 #define UDSECU ("uds ecu %s")
 #define UDSRECV ("uds recv %s")
@@ -21,18 +23,28 @@
 
 #define null NULL
 
+QueueHandle_t txUDSFifo;
+u8 *udsBuffer;
+StaticQueue_t udsStaticQueue;
+
 extern TaskHandle_t canRxHandle;
 extern TaskHandle_t wifiSendHandle;
-extern TaskHandle_t udsRecvHandle;
+extern TaskHandle_t udsSendHandle;
 extern QueueHandle_t rxMsgFifo;
 extern QueueHandle_t txMsgFifo;
 extern void can_clearFilter();
 extern bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt);
+extern bool (*canQueueUDSPtr)(CAN_CMD_UDSFRAME *msg);
+extern void (*canSend2Wifi)(uint8_t *data, int len);
 
 u32 send, recv;
 u32 funcId = 0x7df;
 CAN_CMD_FRAME cmd;
 CAN_MSG_FRAME txMsg;
+CAN_CMD_UDSFRAME txUdsMsg;
+CAN_MSG_UDSFRAME rxUdsMsg;
+
+TaskHandle_t udsTaskHandle;
 
 UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response);
 bool logAndSendFrame(FrameData *frame);
@@ -248,19 +260,19 @@ bool setAndFilterSendRecvAddress(CAN_CMD_UDSFRAME *request)
 
 UDSResult udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 {
-    canRxHandle = udsRecvHandle;
+    canRxHandle = udsSendHandle;
     do_udsRequest(request, response);
     canRxHandle = wifiSendHandle;
 }
 UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 {
-    UDSResult result = {.success = false};
+    UDSResult result = {.success = false, .errorMessage = *response->errorMessage};
     bool error = false;
     bool responseComplete = false;
     u16 P2CAN_Client = 500;
     u16 requestDataLength = request->dataLen;
 
-    response->dataLen=0;
+    response->dataLen = 0;
 
     if (request->data == null || !request->dataLen)
     {
@@ -275,7 +287,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
         return result;
     }
 
-    setAndFilterSendRecvAddress(request);
+    //setAndFilterSendRecvAddress(request);
     // 多帧传输
     if (request->dataLen > 7)
     {
@@ -536,4 +548,39 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
         }
     }
     return result;
+}
+
+static void uds_task()
+{
+    while (1)
+    {
+        if (!xQueueReceive(txUDSFifo, &txUdsMsg, portMAX_DELAY))
+            continue;
+        UDSResult udsRes = udsRequest(&txUdsMsg, &rxUdsMsg);
+
+        rxUdsMsg.success = udsRes.success;
+        rxUdsMsg.nrc = udsRes.nrc;
+        canSend2Wifi(&txUdsMsg, sizeof(CAN_MSG_UDSFRAME) - (4096 - txUdsMsg.dataLen));
+    }
+}
+
+static bool uds_enqueue_msg(CAN_CMD_UDSFRAME *msg)
+{
+    BaseType_t postTaskWoken = pdFALSE;
+    if (!xQueueSend(txUDSFifo, (void *)msg, 2))
+    {
+        report("can tx fifo full, discard");
+        return false;
+    }
+    return true;
+}
+
+void uds_init()
+{
+    udsBuffer = (uint8_t *)heap_caps_malloc(TX_UDSMSGNUM * sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
+    txUDSFifo = xQueueCreateStatic(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), udsBuffer, &udsStaticQueue);
+
+    xTaskCreatePinnedToCore(uds_task, "uds task", 4096, NULL, 10, &udsTaskHandle, 1);
+
+    canQueueUDSPtr = uds_enqueue_msg;
 }

@@ -42,11 +42,13 @@ ReportMsg *resportMsgInit()
 /// @return
 bool (*canQueuePtr)(CAN_CMD_FRAME *msg);
 bool (*canQueueMultiPtr)(CAN_CMD_MULTIFRAME *msgs);
+bool (*canQueueUDSPtr)(CAN_CMD_UDSFRAME *msg);
 bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt);
 bool (*canSetCanChlPtr)(u8 *channel);
 extern void (*dataDownHandler)(int len, uint8_t *data);
 extern void (*dataCtrlHandler)(int len, uint8_t *data);
 static CAN_CMD_MULTIFRAME *frames;
+static CAN_CMD_UDSFRAME *udsf;
 static void dataDown(int len, u8 *data)
 {
 
@@ -76,7 +78,7 @@ static void dataDown(int len, u8 *data)
                 {
                     if (canQueueMultiPtr != NULL)
                     {
-                        volatile int t = xTaskGetTickCount();
+                        // volatile int t = xTaskGetTickCount();
                         // CAN_CMD_FRAME msg;
                         frames = (CAN_CMD_MULTIFRAME *)(ptr + sizeof(DataDownMsg));
                         // u8 dlc = frames->txObj.bF.ctrl.DLC;
@@ -91,8 +93,39 @@ static void dataDown(int len, u8 *data)
                         // }
                         canQueueMultiPtr(frames);
                         recvedMsgs += frames->frames;
-                        t = xTaskGetTickCount() - t;
+                        // t = xTaskGetTickCount() - t;
                         // msg.channel = t;
+                    }
+                    // canSendOneFrame((CAN_CMD_FRAME *)ptr);
+                }
+                else
+                    msgStats = MSG_DATALEN_MISMATCH;
+                break;
+            case UDS_FRAMES:
+                if (head->dataLen == head->elementSize * head->elementCount)
+                {
+                    if (canQueueUDSPtr != NULL)
+                    {
+                        udsf = (CAN_CMD_UDSFRAME *)(ptr + sizeof(DataDownMsg));
+                        if (!udsf->dataLen || !udsf->txObj.bF.ctrl.DLC)
+                        {
+                            msgStats = MSG_DATA_FORMAT_ERROR;
+                        }
+                        else
+                        {
+                            canQueueUDSPtr(udsf);
+                            u8 lenPerFrame = (udsf->txObj.bF.ctrl.DLC - 1);
+                            if (udsf->dataLen > lenPerFrame)
+                            {
+                                u16 continuousDataLen = udsf->dataLen - udsf->txObj.bF.ctrl.DLC;
+                                u16 continuousFrames = continuousDataLen / lenPerFrame;
+                                if (continuousFrames * lenPerFrame < continuousDataLen)
+                                    continuousFrames++;
+                                recvedMsgs += 1 + continuousFrames;
+                            }
+                            else
+                                recvedMsgs += 1;
+                        }
                     }
                     // canSendOneFrame((CAN_CMD_FRAME *)ptr);
                 }
