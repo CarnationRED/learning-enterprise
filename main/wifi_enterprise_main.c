@@ -120,14 +120,14 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             sprintf(thisGw, IPSTR, IP2STR(&ip.gw));
 
             led1Flash2(15, 0xffffffff, 95);
-            ESP_LOGI(TAG,"spi  heap:\t%ld KB",esp_get_free_heap_size()/1024);
-            ESP_LOGI(TAG,"rtos heap:\t%d KB\n",xPortGetFreeHeapSize()/1024);
+            ESP_LOGI(TAG, "spi  heap:\t%ld KB", esp_get_free_heap_size() / 1024);
+            ESP_LOGI(TAG, "rtos heap:\t%d KB\n", xPortGetFreeHeapSize() / 1024);
             vTaskDelay(20);
-            ESP_LOGI(TAG,"spi  heap:\t%ld KB",esp_get_free_heap_size()/1024);
-            ESP_LOGI(TAG,"rtos heap:\t%d KB\n",xPortGetFreeHeapSize()/1024);
+            ESP_LOGI(TAG, "spi  heap:\t%ld KB", esp_get_free_heap_size() / 1024);
+            ESP_LOGI(TAG, "rtos heap:\t%d KB\n", xPortGetFreeHeapSize() / 1024);
             mqtt_start();
-            ESP_LOGI(TAG,"spi  heap:\t%ld KB",esp_get_free_heap_size()/1024);
-            ESP_LOGI(TAG,"rtos heap:\t%d KB\n",xPortGetFreeHeapSize()/1024);
+            ESP_LOGI(TAG, "spi  heap:\t%ld KB", esp_get_free_heap_size() / 1024);
+            ESP_LOGI(TAG, "rtos heap:\t%d KB\n", xPortGetFreeHeapSize() / 1024);
             /* printf("~~~~~~~~~~~");
              printf("IP:%s\n", thisIp);
              // printf("Startup: sys(%ldms) app(%ldms)", t_sysInit * 10, (t_staInit - t_sysInit) * 10);
@@ -223,7 +223,6 @@ void initialise_wifi_noneEnt(void)
                                                         NULL,
                                                         &instance_got_ip));
 
-
     wifi_config_t wifi_config = {
         .sta = {
             .password = WIFI_PWD,
@@ -239,7 +238,7 @@ void initialise_wifi_noneEnt(void)
     uint8_t mac[6];
     uint8_t ssid[32];
     esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
-    char *ssid_noneEnt =  (char*)&wifi_config.sta.ssid;
+    char *ssid_noneEnt = (char *)&wifi_config.sta.ssid;
     sprintf(ssid_noneEnt, "DfTest%2x%2x%2x", mac[3], mac[4], mac[5]);
     ESP_LOGI("Wifi", "Connecting %s, %s", wifi_config.sta.ssid, WIFI_PWD);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -280,6 +279,35 @@ void initialise_wifi_noneEnt(void)
 extern void spitest();
 extern void task_mechine();
 void led();
+//  CAN_CMD_UDSFRAME f = {
+//         .txObj =
+//             {
+//                 .bF =
+//                     {
+//                         .id = {.SID = 0x7c6},
+//                         .ctrl =
+//                             {
+//                                 .IDE = 0,
+//                                 .DLC = 8,
+//                                 .BRS = 0,
+//                                 .FDF = 0,
+//                             }},
+//             },
+//         .filter =
+//             {
+//                 .fObj =
+//                     {
+//                         .SID = 0x7c6,
+//                     },
+//                 .mObj =
+//                     {
+//                         .MSID = 0x7FF, // match all bits
+//                         .MIDE = 1,     // match ide
+//                     },
+//                 .enabled = 1,
+//                 .filterId = 0},
+//         .channel = 5,
+//     };
 void app_main(void)
 {
     t_sysInit = xTaskGetTickCount();
@@ -300,18 +328,11 @@ void app_main(void)
     led_init2();
     can_init();
     msg_init();
-    uds_init();
+   uds_init();
 
-
-    //    volatile int s1 = sizeof(CAN_TX_MSGOBJ);
-    //    volatile int s2 = sizeof(CAN_MSGOBJ_ID);
-    //    volatile int s3 = sizeof(CAN_TX_MSGOBJ_CTRL);
-    //    volatile int s4 = sizeof(CAN_MSG_TIMESTAMP);
-    //    volatile CAN_CMD_FRAME ss;
-    //    ss.txObj.word[0]=  ss.txObj.word[1]=  ss.txObj.word[2]=0;
-    //    ss.txObj.bF.id.EID=0x112;
-    //    ss.txObj.bF.id.SID=0x112;
-    //    ss.txObj.bF.id.SID=0x113;
+    
+    // volatile u8* p=(u8*)&f;
+    // volatile u8* p1=(u8*)&f;
 }
 void led()
 {

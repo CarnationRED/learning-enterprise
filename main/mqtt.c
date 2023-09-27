@@ -161,7 +161,7 @@ void (*mqtt_start)(void) = &mqtt_app_start;
 void mqtt_dataUp_pulish(char *data, int len)
 {
     int msg_id;
-    msg_id = esp_mqtt_client_publish(client, tup, data, len, 0, 0);
+    msg_id = esp_mqtt_client_publish(client, tup, data, len, 2, 0);
     // ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
 }
 

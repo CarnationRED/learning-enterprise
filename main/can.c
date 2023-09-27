@@ -74,7 +74,7 @@ static REG_CiFLTOBJ fObj;
 static REG_CiMASK mObj;
 static CAN_RX_FIFO_EVENT rxFlags;
 
-#define RX_MSGLEN 400
+#define RX_MSGLEN 100
 #define TX_MSGLEN 32
 #define TX_MULTIMSGLEN 4
 static TaskHandle_t txHandle, rxHandle;
@@ -90,7 +90,7 @@ QueueHandle_t txMultiMsgFifo;
 QueueSetHandle_t txFifoSet;
 
 
-static CAN_MSG_FRAME msg = {};
+static CAN_MSG_FRAME msg = {.direction = 0};
 uint8_t canSendWifiTxBuffer[16384];
 long wifiSent = 0, canSent = 0;
 
@@ -214,7 +214,7 @@ static void task_canrx()
             if (count == 12)
             {
                 count = 0;
-                xTaskNotifyGive(canRxHandle);
+                xTaskNotifyGive(canRxHandle);//Optimize to ISR function
             }
         }
         xTaskNotifyGive(canRxHandle);
