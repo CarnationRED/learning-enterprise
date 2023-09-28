@@ -579,7 +579,7 @@ static void uds_task()
     while (1)
     {
         assert(txUDSFifo);
-        if (!xQueueReceive(txUDSFifo, &txUdsMsg, 100))
+        if (!xQueueReceive(txUDSFifo, &txUdsMsg, portMAX_DELAY))
             continue;
         UDSResult udsRes = udsRequest(&txUdsMsg, &rxUdsMsg);
 
