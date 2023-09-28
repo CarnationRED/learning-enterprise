@@ -38,6 +38,7 @@ extern void can_clearFilter();
 extern bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt);
 extern bool (*canQueueUDSPtr)(CAN_CMD_UDSFRAME *msg);
 extern void (*canSend2Wifi)(uint8_t *data, int len);
+extern bool udsRunning;
 
 u32 send, recv;
 u32 funcId = 0x7df;
@@ -112,7 +113,7 @@ u8 getDataOffset(u8 sid)
 {
     switch (sid)
     {
-        // clang-format off
+    // clang-format off
         case 0x01: case 0x41: return 2;
         case 0x03: case 0x43: return 2;
         case 0x09: case 0x49: return 3;
@@ -192,42 +193,47 @@ FrameData logAndTakeFrameData(CAN_MSG_FRAME *frame)
     array.dlc = frame->rxObj.bF.ctrl.DLC;
     array.data = &frame->data;
 
-    BaseType_t receiveTaskWoken = pdFALSE;
-    if (!xQueueSendFromISR(rxMsgFifo, (void *)&frame, &receiveTaskWoken))
-    {
-        report("can recv fifo full, discard");
-    }
-    else
-    {
-        xTaskNotifyGive(wifiSendHandle);
-        if (receiveTaskWoken)
-        {
-            portYIELD_FROM_ISR();
-        }
-    }
+    frame->rxObj.bF.timeStamp = pdTICKS_TO_MS(xTaskGetTickCount());
+    canSend2Wifi((void *)frame, sizeof(CAN_MSG_FRAME));
+
+    // BaseType_t receiveTaskWoken = pdFALSE;
+    // if (!xQueueSendFromISR(rxMsgFifo, (void *)&frame, &receiveTaskWoken))
+    // {
+    //     report("can recv fifo full, discard");
+    // }
+    // else
+    // {
+    //     xTaskNotifyGive(wifiSendHandle);
+    //     if (receiveTaskWoken)
+    //     {
+    //         portYIELD_FROM_ISR();
+    //     }
+    // }
     return array;
 }
 
 bool logAndSendFrame(FrameData *frame)
 {
     for (int i = frame->dlc - 1; i >= 0; i--)
-        cmd.data[i] = frame->data[i];
+        txMsg.data[i] = cmd.data[i] = frame->data[i];
     if (xQueueSend(txMsgFifo, &cmd, 0))
     {
         //$"{DateTime.Now:HH:mm:ss.fff}\t{vci.SendAddress:X2}\t{frame.ByteArrToHexString()}".DebugLogToFile();
-        txMsg.rxObj.bF.timeStamp = xTaskGetTickCount();
+        txMsg.rxObj.bF.timeStamp = pdTICKS_TO_MS(xTaskGetTickCount());
         txMsg.rxObj.bF.id = cmd.txObj.bF.id;
         txMsg.rxObj.bF.ctrl = *((CAN_RX_MSGOBJ_CTRL *)&cmd.txObj.bF.ctrl);
         txMsg.rxObj.bF.ctrl.FilterHit = 0b11111;
         txMsg.direction = 1;
         txMsg.channel = canCurrentChannel;
 
-        if (!xQueueSend(rxMsgFifo, (void*)&txMsg, 0))
-        {
-            report("uds up fifo full");
-        }
-        else
-            xTaskNotifyGive(wifiSendHandle);
+        canSend2Wifi((void *)&txMsg, sizeof(CAN_MSG_FRAME));
+
+        // if (!xQueueSend(rxMsgFifo, (void *)&txMsg, 0))
+        // {
+        //     report("uds up fifo full");
+        // }
+        // else
+        //     xTaskNotifyGive(wifiSendHandle);
         return true;
     }
     else
@@ -245,7 +251,6 @@ bool logAndSendFrame(FrameData *frame)
 //         .fObj.SID11 = request->txObj.bF.id.SID11,
 //         .fObj.EID = request->txObj.bF.id.EID,
 //         .fObj.EXIDE = request->txObj.bF.ctrl.IDE,
-
 //         .mObj.MSID = 0x7ff,
 //         .mObj.MSID11 = 1,
 //         .mObj.MIDE = 1,
@@ -266,7 +271,9 @@ bool logAndSendFrame(FrameData *frame)
 UDSResult udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 {
     canRxHandle = udsSendHandle;
+    udsRunning = true;
     UDSResult r = do_udsRequest(request, response);
+    udsRunning = false;
     canRxHandle = wifiSendHandle;
     return r;
 }
@@ -311,7 +318,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
         for (u8 i = 0; i < 6; i++)
             frame.data[i + 2] = requestData[i];
 
-        u8 *dataCurrentPos = requestData[6 + 1];
+        u8 *dataCurrentPos = requestData + 6;
         // 发送首帧
         if (logAndSendFrame(&frame))
         {
@@ -324,8 +331,9 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
             u16 timeout = P2CAN_Client;
             while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
             {
-                if(msg.direction == 1) continue;
-                if (!xQueueSend(rxMsgFifo, (void*)&msg, 0))
+                if (msg.direction == 1)
+                    continue;
+                if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
                 {
                     report("uds up fifo full");
                 }
@@ -363,9 +371,9 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                                 frameDataLen = 7;
 
                             frame.data[0] = 0x20 + SN;
-                            for (u8 i = 0; i < 7; i++)
+                            for (u8 i = 1; i < 8; i++)
                             {
-                                frame.data[1 + i] = *(dataCurrentPos++);
+                                frame.data[i] = *(dataCurrentPos++);
                             }
 
                             if (!logAndSendFrame(&frame))
@@ -403,7 +411,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                 {
                     if (f.dlc != 0)
                     {
-                        parseSingleFrame(sid, &frame, response, &result);
+                        parseSingleFrame(sid, &f, response, &result);
                         if (result.nrc == 0x78)
                         {
                             timeout = 3300;
@@ -440,7 +448,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
         // temp value, one frame
         FrameData frame = {.data = &data, .dlc = request->txObj.bF.ctrl.DLC};
         frame.data[0] = request->dataLen;
-        memcpy(frame.data + 1, request->data, request->txObj.bF.ctrl.DLC-1);
+        memcpy(frame.data + 1, request->data, request->txObj.bF.ctrl.DLC - 1);
 
         // 发送一帧
         if (logAndSendFrame(&frame))
@@ -459,8 +467,9 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
             u16 timeout = P2CAN_Client;
             while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
             {
-                if(msg.direction == 1) continue;
-                if (!xQueueSend(rxMsgFifo, (void*)&msg, 0))
+                if (msg.direction == 1)
+                    continue;
+                if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
                 {
                     report("uds up fifo full");
                 }
@@ -496,7 +505,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                         receivedFrames = 1;
                         isLongMessage = true;
                         received = recvFrame.dlc - (2 + getDataOffset(sid));
-                        memcpy(response->data, recvFrame.data +2 + getDataOffset(sid), received);
+                        memcpy(response->data, recvFrame.data + 2 + getDataOffset(sid), received);
 
                         // 发送流控帧
                         vTaskDelay(pdMS_TO_TICKS(5));
@@ -574,15 +583,17 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
     return result;
 }
 
+CAN_CMD_UDSFRAME *txUdsMsg1;
 static void uds_task()
 {
+    txUdsMsg1 = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+    assert(txUDSFifo);
     while (1)
     {
-        assert(txUDSFifo);
-        if (!xQueueReceive(txUDSFifo, &txUdsMsg, portMAX_DELAY))
+        if (!xQueueReceive(txUDSFifo, txUdsMsg1, portMAX_DELAY))
             continue;
-        UDSResult udsRes = udsRequest(&txUdsMsg, &rxUdsMsg);
 
+        UDSResult udsRes = udsRequest(txUdsMsg1, &rxUdsMsg);
         rxUdsMsg.success = udsRes.success;
         rxUdsMsg.nrc = udsRes.nrc;
         canSend2Wifi(&rxUdsMsg, sizeof(CAN_MSG_UDSFRAME) - (4096 - rxUdsMsg.dataLen));
@@ -604,7 +615,7 @@ bool uds_enqueue_msg(CAN_CMD_UDSFRAME *msg)
 void uds_init()
 {
     // udsBuffer = (uint8_t *)heap_caps_malloc(TX_UDSMSGNUM * sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
-    assert(txUDSFifo = xQueueCreateWithCaps(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT));
+    assert(txUDSFifo = xQueueCreateWithCaps(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT));
 
     assert(txUDSFifo);
     xTaskCreatePinnedToCore(uds_task, "uds task", 4096, NULL, 10, &udsSendHandle, 1);

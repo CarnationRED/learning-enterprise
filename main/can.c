@@ -78,20 +78,19 @@ static CAN_RX_FIFO_EVENT rxFlags;
 #define TX_MSGLEN 32
 #define TX_MULTIMSGLEN 4
 static TaskHandle_t txHandle, rxHandle;
-//handle to use in canrx, should be set to one of wifiSendHandle and udsSendHandle
+// handle to use in canrx, should be set to one of wifiSendHandle and udsSendHandle
 TaskHandle_t canRxHandle;
-//handle of wifiSend task
+// handle of wifiSend task
 TaskHandle_t wifiSendHandle;
-//handle of udsSend task
+// handle of udsSend task
 TaskHandle_t udsSendHandle;
 QueueHandle_t rxMsgFifo;
 QueueHandle_t txMsgFifo;
 QueueHandle_t txMultiMsgFifo;
 QueueSetHandle_t txFifoSet;
 
-
 static CAN_MSG_FRAME msg = {.direction = 0};
-uint8_t canSendWifiTxBuffer[16384];
+uint8_t canSendWifiTxBuffer[8192];
 long wifiSent = 0, canSent = 0;
 
 extern void (*spican_rx_int_ptr)(u8 para);
@@ -214,9 +213,11 @@ static void task_canrx()
             if (count == 12)
             {
                 count = 0;
-                xTaskNotifyGive(canRxHandle);//Optimize to ISR function
+                // notify wifi send task
+                xTaskNotifyGive(canRxHandle); // Optimize to ISR function
             }
         }
+        // notify wifi send task
         xTaskNotifyGive(canRxHandle);
     }
 }
@@ -283,13 +284,16 @@ static void task_cantx()
 //     canSend2Wifi(canSendWifiTxBuffer, count * sizeof(CAN_MSG_FRAME));
 //     // ESP_LOGI("can2wifi", "sending %d msgs", count);
 // }
+
+// indicating uds running, if uds running, send2wifi is managed in uds
+bool udsRunning = false;
 static void task_can2wifi()
 {
     while (!mqttconnected)
         vTaskDelay(pdMS_TO_TICKS(80));
     APP_CANFDSPI_Init(NULL);
     // spitest();
-    const int maxCountPerPacket = sizeof(canSendWifiTxBuffer) / sizeof(CAN_MSG_FRAME);
+    const u16 maxCountPerPacket = sizeof(canSendWifiTxBuffer) / sizeof(CAN_MSG_FRAME);
 
     while (1)
     {
@@ -297,7 +301,7 @@ static void task_can2wifi()
         assert(canSend2Wifi != NULL);
         int count = 0;
         void *ptr = (void *)&canSendWifiTxBuffer;
-        while (count <= maxCountPerPacket && xQueueReceive(rxMsgFifo, ptr, portTICK_PERIOD_MS * 1))
+        while (!udsRunning && count <= maxCountPerPacket && xQueueReceive(rxMsgFifo, ptr, portTICK_PERIOD_MS * 1))
         {
             ptr += sizeof(CAN_MSG_FRAME);
             count++;
@@ -375,7 +379,6 @@ void can_init()
     rxMsgFifo = xQueueCreate(RX_MSGLEN, sizeof(CAN_MSG_FRAME));
     txMsgFifo = xQueueCreate(TX_MSGLEN, sizeof(CAN_CMD_FRAME));
     txMultiMsgFifo = xQueueCreate(TX_MULTIMSGLEN, sizeof(CAN_CMD_MULTIFRAME));
-
 
     txFifoSet = xQueueCreateSet(TX_MSGLEN + TX_MULTIMSGLEN + 10);
     xQueueAddToSet(txMsgFifo, txFifoSet);
