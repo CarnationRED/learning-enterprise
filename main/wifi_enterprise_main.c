@@ -87,7 +87,16 @@ const int CONNECTED_BIT = BIT0;
 //     ping_deinit();
 //     return ESP_OK;
 // }
-
+bool initialized = false;
+void init_functions()
+{
+    if (initialized)
+        return;
+    can_init();
+    msg_init();
+    uds_init();
+    initialized = true;
+}
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
@@ -126,6 +135,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             ESP_LOGI(TAG, "spi  heap:\t%ld KB", esp_get_free_heap_size() / 1024);
             ESP_LOGI(TAG, "rtos heap:\t%d KB\n", xPortGetFreeHeapSize() / 1024);
             mqtt_start();
+            init_functions();
             ESP_LOGI(TAG, "spi  heap:\t%ld KB", esp_get_free_heap_size() / 1024);
             ESP_LOGI(TAG, "rtos heap:\t%d KB\n", xPortGetFreeHeapSize() / 1024);
             /* printf("~~~~~~~~~~~");
@@ -279,6 +289,7 @@ void initialise_wifi_noneEnt(void)
 extern void spitest();
 extern void task_mechine();
 void led();
+
 //  CAN_CMD_UDSFRAME f = {
 //         .txObj =
 //             {
@@ -311,6 +322,7 @@ void led();
 void app_main(void)
 {
     t_sysInit = xTaskGetTickCount();
+    led_init2();
     ESP_ERROR_CHECK(nvs_flash_init());
     // initialise_wifi();
     //  xTaskCreate(&wpa2_enterprise_example_task, "wpa2_enterprise_example_task", 4096, NULL, 5, &hdle1);
@@ -325,12 +337,7 @@ void app_main(void)
     // ESP_LOGI(TAG, "sizeof ReportMsg=%d", sizeof(ReportMsg));
     // doip_init();
     // return;
-    led_init2();
-    can_init();
-    msg_init();
-   uds_init();
 
-    
     // volatile u8* p=(u8*)&f;
     // volatile u8* p1=(u8*)&f;
 }

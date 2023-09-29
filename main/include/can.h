@@ -13,9 +13,10 @@ void can_init();
 void APP_CANFDSPI_Init(void *p);
 static bool canEnqueueOneFrame(CAN_CMD_FRAME * msg);
 static bool canEnqueueMultiFrame(CAN_CMD_MULTIFRAME * msg);
-static bool canSendOneFrame(CAN_CMD_FRAME * msg);
+bool canSendOneFrame(CAN_CMD_FRAME * msg);
 static bool canSetFilter(CAN_FILTER_CFG *flt);
 static bool canSetCanChl(u8 *channel);
+
 
 typedef enum
 {

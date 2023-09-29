@@ -116,7 +116,7 @@ typedef struct
     u8 data[1408];
 } CAN_CMD_MULTIFRAME;
 
-typedef struct
+typedef struct _CAN_CMD_UDSFRAME
 {
     CAN_TX_MSGOBJ txObj;
     CAN_FILTER_CFG filter;

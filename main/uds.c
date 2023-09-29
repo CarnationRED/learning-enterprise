@@ -12,15 +12,18 @@
 #include "can.h"
 #include "msg.h"
 
+#define UDS_TXQ_CAP MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL
 #define TX_UDSMSGNUM 4
 
-#define UDSSEND ("uds send %s")
-#define UDSECU ("uds ecu %s")
-#define UDSRECV ("uds recv %s")
-#define UDSSID ("uds sid %s")
-#define UDSREQ ("uds req %s")
+#define UDSSEND "uds send %s"
+#define UDSECU "uds ecu %s"
+#define UDSRECV "uds recv %s"
+#define UDSSID "uds sid %s"
+#define UDSREQ "uds req %s"
+#define UDSNRC "uds nrc %2X"
 
 #define ERRMSGFMT(__fmt__, s) sprintf((char *)(result.errorMessage), __fmt__, (s))
+#define ERRMSGFMTPTR(__fmt__, s) sprintf((char *)(result->errorMessage), __fmt__, (s))
 #define ERRMSG(s) sprintf((result.errorMessage), (s))
 
 #define null NULL
@@ -44,8 +47,8 @@ u32 send, recv;
 u32 funcId = 0x7df;
 CAN_CMD_FRAME cmd;
 CAN_MSG_FRAME txMsg;
-CAN_CMD_UDSFRAME txUdsMsg;
-CAN_MSG_UDSFRAME rxUdsMsg;
+CAN_MSG_UDSFRAME *rxUdsMsg;
+bool transferLog;
 
 UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response);
 bool logAndSendFrame(FrameData *frame);
@@ -113,7 +116,7 @@ u8 getDataOffset(u8 sid)
 {
     switch (sid)
     {
-    // clang-format off
+        // clang-format off
         case 0x01: case 0x41: return 2;
         case 0x03: case 0x43: return 2;
         case 0x09: case 0x49: return 3;
@@ -155,35 +158,44 @@ u8 getDataOffset(u8 sid)
 /// @param result UDS request result
 void parseSingleFrame(int udsSid, FrameData *frame, CAN_MSG_UDSFRAME *resultMsg, UDSResult *result)
 {
+    result->success = false;
     if (udsSid > 0xBF)
     {
+        sprintf((char *)result->errorMessage, UDSSID "wrong:%d", "", udsSid);
         ESP_LOGE("UDS", "parseSingleFrame: request sid wrong: %2x", udsSid);
         return;
     }
     if (frame->data[1] == 0x7F)
     {
         result->nrc = frame->data[3];
-        sprintf((char *)result->errorMessage, "NRC:%2x", result->nrc);
+        ERRMSGFMTPTR(UDSNRC, result->nrc);
+        // sprintf((char *)result->errorMessage, "NRC:%2x", result->nrc);
         resultMsg->dataLen = 0;
         return;
     }
     if (udsSid + 0x40 != frame->data[1])
     {
-        sprintf((char *)result->errorMessage, "wrong sid:%2x, expected:%2x", frame->data[1], udsSid + 0x40);
+        sprintf((char *)result->errorMessage, UDSSID ":%2x, expected:%2x", "wrong", frame->data[1], udsSid + 0x40);
         resultMsg->dataLen = 0;
         return;
     }
-    result->success = true;
-    result->errorMessage[0] = '\0';
-    int offet = getDataOffset(udsSid);
+    u8 offset = getDataOffset(udsSid);
     // 06 27 02 01 02 03 04
     // 02 67 02
     // offset=2, udsLen=2
     u8 udsLen = frame->data[0];
-    resultMsg->dataLen = udsLen - offet;
-    for (u8 i = offet + 1; i < frame->dlc; i++)
+    if (udsLen < offset)
     {
-        resultMsg->data[i - (offet + 1)] = frame->data[i];
+        sprintf((char *)result->errorMessage, UDSECU ":%d, expected>=%d", "len err", udsLen, offset);
+        resultMsg->dataLen = 0;
+        return;
+    }
+    result->errorMessage[0] = '\0';
+    result->success = true;
+    resultMsg->dataLen = udsLen - offset;
+    for (u8 i = offset + 1; i < frame->dlc; i++)
+    {
+        resultMsg->data[i - (offset + 1)] = frame->data[i];
     }
 }
 
@@ -193,6 +205,8 @@ FrameData logAndTakeFrameData(CAN_MSG_FRAME *frame)
     array.dlc = frame->rxObj.bF.ctrl.DLC;
     array.data = &frame->data;
 
+    if (!transferLog)
+        return array;
     frame->rxObj.bF.timeStamp = pdTICKS_TO_MS(xTaskGetTickCount());
     canSend2Wifi((void *)frame, sizeof(CAN_MSG_FRAME));
 
@@ -214,10 +228,13 @@ FrameData logAndTakeFrameData(CAN_MSG_FRAME *frame)
 
 bool logAndSendFrame(FrameData *frame)
 {
+    // if (xQueueSend(txMsgFifo, &cmd, 1))
     for (int i = frame->dlc - 1; i >= 0; i--)
         txMsg.data[i] = cmd.data[i] = frame->data[i];
-    if (xQueueSend(txMsgFifo, &cmd, 0))
+    if (canSendOneFrame(&cmd))
     {
+        if (!transferLog)
+            return true;
         //$"{DateTime.Now:HH:mm:ss.fff}\t{vci.SendAddress:X2}\t{frame.ByteArrToHexString()}".DebugLogToFile();
         txMsg.rxObj.bF.timeStamp = pdTICKS_TO_MS(xTaskGetTickCount());
         txMsg.rxObj.bF.id = cmd.txObj.bF.id;
@@ -238,7 +255,7 @@ bool logAndSendFrame(FrameData *frame)
     }
     else
     {
-        report("can tx fifo full");
+        // report("can tx fifo full");
         return false;
     }
 }
@@ -283,25 +300,26 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
     bool error = false;
     bool responseComplete = false;
     u16 P2CAN_Client = 500;
-    u16 requestDataLength = request->dataLen;
+    u32 requestDataLength = request->dataLen;
 
     response->dataLen = 0;
 
     if (!request->dataLen)
     {
-        report("uds req empty");
+        ERRMSGFMT(UDSREQ, "req empty");
         return result;
     }
 
     int sid = request->data[0];
     if (sid + 0x40 > 0xC7)
     {
-        report("uds sid wrong");
+        ERRMSGFMT(UDSSID, "wrong");
         return result;
     }
 
     cmd.txObj = request->txObj;
 
+    xQueueReset(rxMsgFifo);
     // setAndFilterSendRecvAddress(request);
     //  多帧传输
     if (request->dataLen > 7)
@@ -335,7 +353,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                     continue;
                 if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
                 {
-                    report("uds up fifo full");
+                    ERRMSGFMT(UDSSEND, "fifo full");
                 }
                 else
                     xTaskNotifyGive(wifiSendHandle);
@@ -350,15 +368,15 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                     if (first == 0x30)
                     {
                         // max block serial
-                        u8 BS = f.data[1];
+                        volatile u8 BS = f.data[1];
                         // interval between continuous frames
                         u32 STmin = getSTmin(f.data[2]);
                         // frame serial
-                        u8 SN = 1;
+                        volatile u8 SN = 1;
                         // block serial
-                        u8 BN = 0;
+                        volatile u16 BN = 0;
                         // current frame data len
-                        u8 frameDataLen;
+                        volatile u32 frameDataLen;
                         for (; sent < requestDataLength; sent += frameDataLen)
                         {
                             if (STmin > 1000)
@@ -389,6 +407,9 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                             {
                                 BN = 0;
                                 break;
+                            }
+                            if(sent>4080||frameDataLen==0){
+                                volatile u8 aa=1;
                             }
                         }
                         if (sent == requestDataLength)
@@ -468,19 +489,26 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
             while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
             {
                 if (msg.direction == 1)
-                    continue;
-                if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
                 {
-                    report("uds up fifo full");
+                    continue;
                 }
-                else
-                    xTaskNotifyGive(wifiSendHandle);
+                if (msg.data[1] == 0x67)
+                {
+                    volatile u8 aa = 0;
+                }
+                // if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
+                // {
+                //     report("uds up fifo full");
+                // }
+                // else
+                //     xTaskNotifyGive(wifiSendHandle);
 
                 timeout = P2CAN_Client;
                 FrameData recvFrame = logAndTakeFrameData(&msg);
                 if (isNRC78Frame(&recvFrame))
                 {
                     timeout = 3300;
+                    report("NRC78");
                     if (isECUBusy)
                         continue;
                     else
@@ -584,38 +612,65 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 }
 
 CAN_CMD_UDSFRAME *txUdsMsg1;
+CAN_CMD_UDSFRAME *txUdsMsgForMqtt;
 static void uds_task()
 {
     txUdsMsg1 = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+    txUdsMsgForMqtt = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+    rxUdsMsg = (CAN_MSG_UDSFRAME *)heap_caps_malloc(sizeof(CAN_MSG_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
     assert(txUDSFifo);
     while (1)
     {
         if (!xQueueReceive(txUDSFifo, txUdsMsg1, portMAX_DELAY))
             continue;
-
-        UDSResult udsRes = udsRequest(txUdsMsg1, &rxUdsMsg);
-        rxUdsMsg.success = udsRes.success;
-        rxUdsMsg.nrc = udsRes.nrc;
-        canSend2Wifi(&rxUdsMsg, sizeof(CAN_MSG_UDSFRAME) - (4096 - rxUdsMsg.dataLen));
+        ESP_LOGI("uds task", "queue remain:%d", uxQueueSpacesAvailable(txUDSFifo));
+        UDSResult udsRes = udsRequest(txUdsMsg1, rxUdsMsg);
+        rxUdsMsg->success = udsRes.success;
+        rxUdsMsg->nrc = udsRes.nrc;
+        int len = sizeof(CAN_MSG_UDSFRAME) - (4096 - rxUdsMsg->dataLen);
+        if (len > 5000)
+        {
+            volatile u8 lenn = 1;
+        }
+        canSend2Wifi((u8 *)rxUdsMsg, len);
     }
 }
-
-bool uds_enqueue_msg(CAN_CMD_UDSFRAME *msg)
+/// @brief The basic idea of this function is to allow only a portion of CMD being transfered over wifi when there's not much data in a UDS request
+/// @param msg
+/// @param len
+/// @return
+CAN_CMD_UDSFRAME *uds_enqueue_msg(u8 *msg, u16 len)
 {
-    BaseType_t postTaskWoken = pdFALSE;
-    assert(txUDSFifo);
-    if (!xQueueSend(txUDSFifo, (void *)msg, 2))
+    if (len < offsetof(struct _CAN_CMD_UDSFRAME, data))
+        return null;
+    u16 dataLen = *(u16 *)(msg + offsetof(struct _CAN_CMD_UDSFRAME, dataLen));
+    CAN_CMD_UDSFRAME *udsCmd;
+    if (dataLen == 4095)
+    {
+        if (len != sizeof(CAN_CMD_UDSFRAME))
+            return null;
+        udsCmd = (CAN_CMD_UDSFRAME *)msg;
+    }
+    else
+    {
+        memcpy((void *)txUdsMsgForMqtt, (void *)msg, len);
+        udsCmd = txUdsMsgForMqtt;
+    }
+
+    transferLog = cmd.txObj.bF.ctrl.unimplemented1;
+
+    if (!xQueueSend(txUDSFifo, (void *)udsCmd, 2))
     {
         report("can tx fifo full, discard");
-        return false;
+        return udsCmd;
     }
-    return true;
+    return udsCmd;
 }
 
 void uds_init()
 {
     // udsBuffer = (uint8_t *)heap_caps_malloc(TX_UDSMSGNUM * sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
-    assert(txUDSFifo = xQueueCreateWithCaps(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT));
+    assert(txUDSFifo = xQueueCreateWithCaps(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), UDS_TXQ_CAP));
 
     assert(txUDSFifo);
     xTaskCreatePinnedToCore(uds_task, "uds task", 4096, NULL, 10, &udsSendHandle, 1);

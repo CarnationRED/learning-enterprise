@@ -291,7 +291,6 @@ static void task_can2wifi()
 {
     while (!mqttconnected)
         vTaskDelay(pdMS_TO_TICKS(80));
-    APP_CANFDSPI_Init(NULL);
     // spitest();
     const u16 maxCountPerPacket = sizeof(canSendWifiTxBuffer) / sizeof(CAN_MSG_FRAME);
 
@@ -389,6 +388,7 @@ void can_init()
     xTaskCreatePinnedToCore(task_can2wifi, "task_can2wifi", 4096, NULL, 11, &wifiSendHandle, 0);
     xTaskCreatePinnedToCore(task_dbg_print, "task_dbg_print", 2048, NULL, 0, NULL, 0);
     canRxHandle = wifiSendHandle;
+    APP_CANFDSPI_Init(NULL);
 }
 void can_clearFilter()
 {
@@ -613,7 +613,7 @@ static bool canEnqueueMultiFrame(CAN_CMD_MULTIFRAME *msgs)
         return false;
     }
 }
-static bool canSendOneFrame(CAN_CMD_FRAME *msg1)
+bool canSendOneFrame(CAN_CMD_FRAME *msg1)
 {
     if (canSwitchChannel(msg1->channel)) // switch to correct channel
     {

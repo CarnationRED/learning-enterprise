@@ -42,7 +42,7 @@ ReportMsg *resportMsgInit()
 /// @return
 bool (*canQueuePtr)(CAN_CMD_FRAME *msg);
 bool (*canQueueMultiPtr)(CAN_CMD_MULTIFRAME *msgs);
-bool (*canQueueUDSPtr)(CAN_CMD_UDSFRAME *msg);
+CAN_CMD_UDSFRAME *(*canQueueUDSPtr)(u8 *msg, u16 len);
 bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt);
 bool (*canSetCanChlPtr)(u8 *channel);
 extern void (*dataDownHandler)(int len, uint8_t *data);
@@ -106,14 +106,13 @@ static void dataDown(int len, u8 *data)
                 {
                     if (canQueueUDSPtr != NULL)
                     {
-                        udsf = (CAN_CMD_UDSFRAME *)(ptr + sizeof(DataDownMsg));
-                        if (!udsf->dataLen || !udsf->txObj.bF.ctrl.DLC)
+                        udsf = canQueueUDSPtr((u8 *)(ptr + sizeof(DataDownMsg)), len - sizeof(DataDownMsg));
+                        if (!udsf)
                         {
                             msgStats = MSG_DATA_FORMAT_ERROR;
                         }
                         else
                         {
-                            canQueueUDSPtr(udsf);
                             u8 lenPerFrame = (udsf->txObj.bF.ctrl.DLC - 1);
                             if (udsf->dataLen > lenPerFrame)
                             {

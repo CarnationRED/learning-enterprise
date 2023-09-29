@@ -6,6 +6,7 @@
 #include "lwip/netdb.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
+#include "esp_debug_helpers.h"
 #include "mqtt_client.h"
 #include "mqtt.h"
 #include "led.h"
@@ -145,7 +146,7 @@ static void mqtt_app_start(void)
         // .session.keepalive = 2, // 1s
         .session.disable_keepalive = false, // 1s
         // .broker.address.port = 2222,
-        .task.priority = 10,
+        .task.priority = 5,
         .buffer.size = 16384,
         .buffer.out_size = 16384,
     };
@@ -161,7 +162,18 @@ void (*mqtt_start)(void) = &mqtt_app_start;
 void mqtt_dataUp_pulish(char *data, int len)
 {
     int msg_id;
-    msg_id = esp_mqtt_client_publish(client, tup, data, len, 2, 0);
+    int s = heap_caps_get_free_size(MALLOC_CAP_8BIT) / 1024;
+    if (s < 8)
+    {
+        ESP_LOGE("mqtt", "DRAM:%dKB", s);
+    }
+    if (len > 5000)
+    {
+        ESP_LOGE("mqtt", "up len too long:%dKB", len / 1024);
+        esp_backtrace_print(5);
+    }
+    else
+        msg_id = esp_mqtt_client_publish(client, tup, data, len, 2, 0);
     // ESP_LOGI(TAG, "sent publish, msg_id=%d", msg_id);
 }
 

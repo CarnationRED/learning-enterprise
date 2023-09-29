@@ -195,14 +195,22 @@ void led_init2()
 
     const char *TAG = "led";
 
-    ESP_LOGI(TAG, "Create timer handle");
-    gptimer_config_t timer_config = {
+    gptimer_config_t timer_config1 = {
         .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 10000, // 10kHz, 1 tick=0.1ms
     };
-    ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &gptimer1));
-    ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &gptimer2));
+    gptimer_config_t timer_config2 = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 10000, // 10kHz, 1 tick=0.1ms
+    };
+    ESP_ERROR_CHECK(gptimer_new_timer(&timer_config1, &gptimer1));
+    assert(gptimer1);
+    ESP_LOGI(TAG, "Create timer1 handle");
+    ESP_ERROR_CHECK(gptimer_new_timer(&timer_config2, &gptimer2));
+    assert(gptimer2);
+    ESP_LOGI(TAG, "Create timer2 handle");
 
     gptimer_event_callbacks_t cbs = {
         .on_alarm = led1_cb,
@@ -236,6 +244,10 @@ void led1Flash2(uint8_t hz, uint32_t times, uint8_t brightness)
         .reload_count = 0,
         .flags.auto_reload_on_alarm = 1,
     };
+    assert(gptimer1);
+    assert(gptimer2);
+
+    ESP_LOGI("","alarm_count%ld",(long)alarm_config1.alarm_count);
     ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer1, &alarm_config1));
 
     gptimer_stop(gptimer1);
