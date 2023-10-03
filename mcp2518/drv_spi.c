@@ -158,14 +158,6 @@ void spi_master_init(void)
       .queue_size = 400,
   };
 
-  // gpio_config_t conf;
-  // conf.intr_type=GPIO_INTR_DISABLE;
-  // conf.mode=GPIO_MODE_OUTPUT;
-  // conf.pin_bit_mask=PIN_NUM_CS;
-  // conf.pull_down_en=GPIO_PULLDOWN_DISABLE;
-  // conf.pull_up_en=GPIO_PULLUP_DISABLE;
-  // gpio_config(&conf);
-  // gpio_reset_pin(PIN_NUM_CS);
   if (spi != NULL)
   {
     spi_bus_remove_device(spi);
@@ -179,36 +171,6 @@ void spi_master_init(void)
   // Attach  to the SPI bus
   ret = spi_bus_add_device(SPI2_HOST, &devcfg, &spi);
   ESP_ERROR_CHECK(ret);
-
-  // gpio_set_direction(PIN_NUM_MISO, GPIO_MODE_INPUT);
-  // // gpio_set_pull_mode(PIN_NUM_MISO, GPIO_FLOATING);
-  // gpio_set_direction(PIN_NUM_MOSI, GPIO_MODE_OUTPUT);
-  // gpio_set_direction(PIN_NUM_CLK, GPIO_MODE_OUTPUT);
-  // Set up GPIO matrix
-  // gpio_config_t io_conf;
-  // io_conf.intr_type = GPIO_INTR_DISABLE;
-  // io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
-  // io_conf.pin_bit_mask = (1ULL << PIN_NUM_MISO) | (1ULL << PIN_NUM_CLK) | (1ULL << 9) | (1ULL << PIN_NUM_MOSI);
-  // io_conf.pull_down_en = 0;
-  // io_conf.pull_up_en = 0;
-  // gpio_config(&io_conf);
-  // gpio_matrix_out(9, FSPICS0_OUT_IDX, 0, 0);
-  // // gpio_matrix_in(PIN_NUM_MISO, FSPID_IN_IDX, 0);
-  // // gpio_matrix_out(PIN_NUM_CLK, FSPICLK_OUT_IDX, 0, 0);
-  // // gpio_matrix_out(PIN_NUM_MOSI, FSPIQ_OUT_IDX, 0, 0);
-
-  // REG_SET_FIELD(GPIO_FUNC11_OUT_SEL_CFG_REG, GPIO_FUNC11_OUT_SEL, FSPID_IN_IDX);
-  // REG_SET_FIELD(GPIO_FUNC12_OUT_SEL_CFG_REG, GPIO_FUNC12_OUT_SEL, FSPICLK_OUT_IDX);
-  // REG_SET_FIELD(GPIO_FUNC13_OUT_SEL_CFG_REG, GPIO_FUNC13_OUT_SEL, FSPIQ_OUT_IDX);
-
-  // REG_CLR_BIT(GPIO_FUNC11_OUT_SEL_CFG_REG, GPIO_FUNC11_OEN_SEL);
-  // REG_CLR_BIT(GPIO_FUNC12_OUT_SEL_CFG_REG, GPIO_FUNC12_OEN_SEL);
-  // REG_CLR_BIT(GPIO_FUNC13_OUT_SEL_CFG_REG, GPIO_FUNC13_OEN_SEL);
-
-  // PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[9], PIN_FUNC_GPIO);
-  // PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[PIN_NUM_MISO], PIN_FUNC_GPIO);
-  // PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[PIN_NUM_CLK], PIN_FUNC_GPIO);
-  // PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[PIN_NUM_MOSI], PIN_FUNC_GPIO);
 }
 
 static u8 lock = 0;
@@ -222,7 +184,7 @@ int8_t spi_master_transfer(uint8_t *SpiTxData, uint8_t *SpiRxData, uint16_t spiT
   spi_packet.length = 8 * spiTransferSize;
   while (lock != 0)
   {
-    ESP_LOGI("drv_spi", "spi yield");
+    ESP_LOGE("drv_spi", "spi yield");
     portYIELD();
   }
   lock = 1;

@@ -345,6 +345,7 @@ typedef struct _CAN_RX_MSGOBJ_CTRL {
     uint32_t ESI : 1;
     uint32_t unimplemented1 : 2;
     uint32_t FilterHit : 5;
+    //DfMiniBox: Space available for UDS queue
     uint32_t unimplemented2 : 16;
 } CAN_RX_MSGOBJ_CTRL;
 

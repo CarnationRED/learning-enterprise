@@ -11,7 +11,7 @@
 // extern QueueHandle_t txMultiMsgFifo;
 
 MSG_STATS msgStats;
-int recvedMsgs = 0;
+int recvedCmds = 0;
 extern CAN_STATS canStats;
 typedef struct _ReportMsg
 {
@@ -66,7 +66,7 @@ static void dataDown(int len, u8 *data)
                     if (canQueuePtr != NULL)
                     {
                         canQueuePtr((CAN_CMD_FRAME *)(ptr + sizeof(DataDownMsg)));
-                        recvedMsgs++;
+                        recvedCmds++;
                     }
                     // canSendOneFrame((CAN_CMD_FRAME *)ptr);
                 }
@@ -92,7 +92,7 @@ static void dataDown(int len, u8 *data)
                         //     d += dlc;
                         // }
                         canQueueMultiPtr(frames);
-                        recvedMsgs += frames->frames;
+                        recvedCmds += frames->frames;
                         // t = xTaskGetTickCount() - t;
                         // msg.channel = t;
                     }
@@ -120,10 +120,10 @@ static void dataDown(int len, u8 *data)
                                 u16 continuousFrames = continuousDataLen / lenPerFrame;
                                 if (continuousFrames * lenPerFrame < continuousDataLen)
                                     continuousFrames++;
-                                recvedMsgs += 1 + continuousFrames;
+                                recvedCmds += 1 + continuousFrames;
                             }
                             else
-                                recvedMsgs += 1;
+                                recvedCmds += 1;
                         }
                     }
                     // canSendOneFrame((CAN_CMD_FRAME *)ptr);

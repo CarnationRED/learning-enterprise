@@ -144,8 +144,8 @@ u8 getDataOffset(u8 sid)
         case 0x31: case 0x71: return 4;
         case 0x34: case 0x74: return 4;
         case 0x35: case 0x75: return 4;
-        case 0x36: case 0x76: return 4;
-        case 0x37: case 0x77: return 4;
+        case 0x36: case 0x76: return 2;
+        case 0x37: case 0x77: return 1;
         case 0x38: case 0x78: return 4;
         default:              return 1;
         // clang-format on
@@ -176,7 +176,9 @@ void parseSingleFrame(int udsSid, FrameData *frame, CAN_MSG_UDSFRAME *resultMsg,
     if (udsSid + 0x40 != frame->data[1])
     {
         sprintf((char *)result->errorMessage, UDSSID ":%2x, expected:%2x", "wrong", frame->data[1], udsSid + 0x40);
-        resultMsg->dataLen = 0;
+        resultMsg->dataLen = frame->dlc;
+        for (u8 i = 0; i < frame->dlc; i++)
+            resultMsg->data[i] = frame->data[i];
         return;
     }
     u8 offset = getDataOffset(udsSid);
@@ -187,7 +189,9 @@ void parseSingleFrame(int udsSid, FrameData *frame, CAN_MSG_UDSFRAME *resultMsg,
     if (udsLen < offset)
     {
         sprintf((char *)result->errorMessage, UDSECU ":%d, expected>=%d", "len err", udsLen, offset);
-        resultMsg->dataLen = 0;
+        resultMsg->dataLen = frame->dlc;
+        for (u8 i = 0; i < frame->dlc; i++)
+            resultMsg->data[i] = frame->data[i];
         return;
     }
     result->errorMessage[0] = '\0';
@@ -287,11 +291,7 @@ bool logAndSendFrame(FrameData *frame)
 
 UDSResult udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 {
-    canRxHandle = udsSendHandle;
-    udsRunning = true;
     UDSResult r = do_udsRequest(request, response);
-    udsRunning = false;
-    canRxHandle = wifiSendHandle;
     return r;
 }
 UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
@@ -299,7 +299,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
     UDSResult result = {.success = false, .errorMessage = &response->errorMessage};
     bool error = false;
     bool responseComplete = false;
-    u16 P2CAN_Client = 500;
+    u32 P2CAN_Client = 500;
     u32 requestDataLength = request->dataLen;
 
     response->dataLen = 0;
@@ -346,17 +346,17 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
             u32 sendCompleted = 0;
             CAN_MSG_FRAME msg;
             // timeout value between each 2 frames, can be set larger if NRC78 is received
-            u16 timeout = P2CAN_Client;
+            u32 timeout = P2CAN_Client;
             while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
             {
                 if (msg.direction == 1)
                     continue;
-                if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
-                {
-                    ERRMSGFMT(UDSSEND, "fifo full");
-                }
-                else
-                    xTaskNotifyGive(wifiSendHandle);
+                // if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
+                // {
+                //     ERRMSGFMT(UDSSEND, "fifo full");
+                // }
+                // else
+                //     xTaskNotifyGive(wifiSendHandle);
 
                 timeout = P2CAN_Client;
                 FrameData f = logAndTakeFrameData(&msg);
@@ -408,8 +408,9 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                                 BN = 0;
                                 break;
                             }
-                            if(sent>4080||frameDataLen==0){
-                                volatile u8 aa=1;
+                            if (sent > 4080 || frameDataLen == 0)
+                            {
+                                volatile u8 aa = 1;
                             }
                         }
                         if (sent == requestDataLength)
@@ -439,15 +440,22 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                             sendCompleted += 3300;
                             continue;
                         }
+                        error = !result.success;
                         break;
                     }
                     else if (pdTICKS_TO_MS(xTaskGetTickCount()) - sendCompleted >= P2CAN_Client)
                     {
                         result.success = false;
-                        ERRMSGFMT(UDSSEND, "timout");
+                        error = true;
+                        ERRMSGFMT(UDSECU, "didn't response in time");
                         break;
                     }
                 }
+            }
+            if (!result.success && !error)
+            {
+                ERRMSGFMT(UDSECU, "didn't response in time");
+                error = true;
             }
         }
         else
@@ -485,7 +493,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 
             CAN_MSG_FRAME msg;
             // timeout value between each 2 frames, can be set larger if NRC78 is received
-            u16 timeout = P2CAN_Client;
+            u32 timeout = P2CAN_Client;
             while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
             {
                 if (msg.direction == 1)
@@ -601,6 +609,11 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                     }
                 }
             }
+            if (!result.success && !error)
+            {
+                ERRMSGFMT(UDSECU, "didn't response in time");
+                error = true;
+            }
         }
         else
         {
@@ -623,16 +636,19 @@ static void uds_task()
     {
         if (!xQueueReceive(txUDSFifo, txUdsMsg1, portMAX_DELAY))
             continue;
-        ESP_LOGI("uds task", "queue remain:%d", uxQueueSpacesAvailable(txUDSFifo));
+        canRxHandle = udsSendHandle;
+        udsRunning = true;
+        transferLog = txUdsMsg1->txObj.bF.ctrl.unimplemented1;
         UDSResult udsRes = udsRequest(txUdsMsg1, rxUdsMsg);
         rxUdsMsg->success = udsRes.success;
         rxUdsMsg->nrc = udsRes.nrc;
         int len = sizeof(CAN_MSG_UDSFRAME) - (4096 - rxUdsMsg->dataLen);
-        if (len > 5000)
-        {
-            volatile u8 lenn = 1;
-        }
+        u8 space = uxQueueSpacesAvailable(txUDSFifo);
+        rxUdsMsg->rxObj.bF.ctrl.unimplemented2 = space;
+        ESP_LOGI("uds task", "queue remain:%d", space);
         canSend2Wifi((u8 *)rxUdsMsg, len);
+        udsRunning = false;
+        canRxHandle = wifiSendHandle;
     }
 }
 /// @brief The basic idea of this function is to allow only a portion of CMD being transfered over wifi when there's not much data in a UDS request
@@ -656,8 +672,6 @@ CAN_CMD_UDSFRAME *uds_enqueue_msg(u8 *msg, u16 len)
         memcpy((void *)txUdsMsgForMqtt, (void *)msg, len);
         udsCmd = txUdsMsgForMqtt;
     }
-
-    transferLog = cmd.txObj.bF.ctrl.unimplemented1;
 
     if (!xQueueSend(txUDSFifo, (void *)udsCmd, 2))
     {

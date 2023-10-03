@@ -132,7 +132,7 @@ static void mqtt_app_start(void)
     if (client)
     {
         esp_mqtt_client_stop(client);
-        esp_mqtt_client_destroy(client);
+        esp_mqtt_client_start(client);
     }
     subscribed = false;
 
@@ -145,6 +145,8 @@ static void mqtt_app_start(void)
         .broker.address.uri = uri,
         // .session.keepalive = 2, // 1s
         .session.disable_keepalive = false, // 1s
+        .network.timeout_ms =2000,
+        .network.reconnect_timeout_ms = 2000,
         // .broker.address.port = 2222,
         .task.priority = 5,
         .buffer.size = 16384,
