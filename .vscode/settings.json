@@ -65,6 +65,7 @@
     "spi_master.h": "c",
     "doip.h": "c",
     "led.h": "c",
-    "cstddef": "c"
+    "cstddef": "c",
+    "queue.h": "c"
   }
 }

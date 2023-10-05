@@ -5,6 +5,7 @@
 #include "lwip/dns.h"
 #include "lwip/netdb.h"
 #include "esp_wifi.h"
+#include "esp_system.h"
 #include "esp_log.h"
 #include "esp_debug_helpers.h"
 #include "mqtt_client.h"
@@ -69,12 +70,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        // esp_mqtt_client_disconnect(client);
         esp_wifi_disconnect();
         esp_wifi_connect();
         led1Flash2(15, 0xffffffff, 95);
-        //  esp_mqtt_client_stop(client);
-        //  esp_mqtt_client_start(client);
+
+        //force reset!!, this solves most errors
+        esp_restart();
         subscribed = false;
         break;
 
@@ -149,8 +150,8 @@ static void mqtt_app_start(void)
         .network.reconnect_timeout_ms = 2000,
         // .broker.address.port = 2222,
         .task.priority = 5,
-        .buffer.size = 16384,
-        .buffer.out_size = 16384,
+        .buffer.size = 8192,
+        .buffer.out_size = 8192,
     };
 
     client = esp_mqtt_client_init(&mqtt_cfg);

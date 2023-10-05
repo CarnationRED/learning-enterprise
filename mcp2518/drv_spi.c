@@ -46,6 +46,7 @@ OF SUCH DAMAGE.
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_attr.h"
+#include "esp_debug_helpers.h"
 #include "esp32s3/rom/gpio.h"
 #include "soc/gpio_periph.h"
 #include "soc/gpio_sig_map.h"
@@ -188,6 +189,11 @@ int8_t spi_master_transfer(uint8_t *SpiTxData, uint8_t *SpiRxData, uint16_t spiT
     portYIELD();
   }
   lock = 1;
+  if(spi==NULL)
+  {
+        esp_backtrace_print(5);
+        abort();
+  }
   if (spi_device_transmit(spi, &spi_packet) != ESP_OK)
   {
     lock = 0;

@@ -26,39 +26,7 @@ extern int recvedCmds;
 
 CAN_STATS canStats = CAN_STAT_INIT;
 
-// Interrupts
-#define INT_IN 8
-#define INT_TX_IN 17
-#define INT_RX_IN 18
-
-#define APP_INT() (!gpio_get_level(INT_IN))
-#define APP_TX_INT() (!gpio_get_level(INT_TX_IN)) // 1：TXQ not full
-#define APP_RX_INT() (!gpio_get_level(INT_RX_IN)) // 1：RX FIFO not empty
-
-#define CH444G_SW0 36
-#define CH444G_SW1 35
-#define CH444G_SWEN 45
-#define SWENABLE() gpio_pullup_en(CH444G_SWEN)
-#define SWDISABLE() gpio_pulldown_en(CH444G_SWEN)
-#define SW0_0() gpio_set_level(CH444G_SW0, 0)
-#define SW1_0() gpio_set_level(CH444G_SW1, 0)
-#define SW0_1() gpio_set_level(CH444G_SW0, 1)
-#define SW1_1() gpio_set_level(CH444G_SW1, 1)
 u8 canCurrentChannel = -1;
-
-// Message IDs
-#define TX_REQUEST_ID 0x300
-#define TX_RESPONSE_ID 0x301
-#define BUTTON_STATUS_ID 0x201
-#define LED_STATUS_ID 0x200
-#define PAYLOAD_ID 0x101
-
-// Transmit Channels
-#define APP_TX_FIFO CAN_FIFO_CH2
-// #define APP_USE_TX_INT 1
-
-// Receive Channels
-#define APP_RX_FIFO CAN_FIFO_CH1
 static CAN_CONFIG config;
 static CAN_OPERATION_MODE opMode;
 
@@ -77,13 +45,15 @@ static CAN_RX_FIFO_EVENT rxFlags;
 #define RX_MSGLEN 100
 #define TX_MSGLEN 32
 #define TX_MULTIMSGLEN 4
-static TaskHandle_t txHandle, thisCanRxHandle;
-// handle to use in canrx, should be set to one of wifiSendHandle and udsSendHandle
-TaskHandle_t canRxHandle;
+static TaskHandle_t txHandle;
 // handle of wifiSend task
 TaskHandle_t wifiSendHandle;
+// handle to use in canrx isr, should be set to either regularCanRxHandle or udsCanRxHandle
+TaskHandle_t canRxHandle;
+// handle of regular canrx task
+TaskHandle_t regularCanRxHandle;
 // handle of udsSend task
-TaskHandle_t udsRxHandle;
+TaskHandle_t udsCanRxHandle;
 QueueHandle_t rxMsgFifo;
 QueueHandle_t txMsgFifo;
 QueueHandle_t txMultiMsgFifo;
@@ -156,7 +126,7 @@ static void IRAM_ATTR can_rx_int_handler(u8 para)
 {
     BaseType_t xHigherProrityTaskWoken = pdFALSE;
     msg.channel = canCurrentChannel;
-    vTaskNotifyGiveFromISR(thisCanRxHandle, &xHigherProrityTaskWoken);
+    vTaskNotifyGiveFromISR(canRxHandle, &xHigherProrityTaskWoken);
     crs = 0; rxtick=xTaskGetTickCountFromISR();
     portYIELD_FROM_ISR(xHigherProrityTaskWoken);
                     recvedMsgs++;
@@ -173,7 +143,7 @@ void canChannelInit()
     // gpio_set_direction(CH444G_SWEN, GPIO_MODE_OUTPUT);
     gpio_set_pull_mode(CH444G_SWEN, GPIO_PULLUP_PULLDOWN);
 }
-static bool canrx_fifo_not_empty()
+bool canrx_fifo_not_empty()
 {
     CAN_RX_FIFO_EVENT evt;
     DRV_CANFDSPI_ReceiveChannelEventGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &evt);
@@ -385,8 +355,8 @@ static void task_dbg_print()
 }
 void can_init()
 {
-    canChannelInit();
-    SWENABLE();
+    // canChannelInit();
+    // SWENABLE();
     spican_rx_int_ptr = &can_rx_int_handler;
     canQueuePtr = canEnqueueOneFrame;
     canQueueMultiPtr = canEnqueueMultiFrame;
@@ -402,12 +372,13 @@ void can_init()
     xQueueAddToSet(txMsgFifo, txFifoSet);
     xQueueAddToSet(txMultiMsgFifo, txFifoSet);
 
-    xTaskCreatePinnedToCore(task_canrx, "task_canrx", 4096, NULL, 24, &thisCanRxHandle, 1);
+    APP_CANFDSPI_Init(NULL);
+    
+    xTaskCreatePinnedToCore(task_canrx, "task_canrx", 4096, NULL, 24, &regularCanRxHandle, 1);
     xTaskCreatePinnedToCore(task_cantx, "task_cantx", 4096, NULL, 24, &txHandle, 1);
     xTaskCreatePinnedToCore(task_can2wifi, "task_can2wifi", 4096, NULL, 11, &wifiSendHandle, 0);
     xTaskCreatePinnedToCore(task_dbg_print, "task_dbg_print", 3072, NULL, 0, NULL, 0);
     canRxHandle = wifiSendHandle;
-    APP_CANFDSPI_Init(NULL);
 }
 void can_clearFilter()
 {

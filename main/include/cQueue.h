@@ -51,8 +51,6 @@ extern "C"
 		uint16_t out;  //!< number of records pulled from the queue (only for FIFO)
 		uint16_t cnt;  //!< number of records not retrieved from the queue
 		uint16_t init; //!< set to QUEUE_INITIALIZED after successful init of the queue and reset when killing queue
-
-		uint8_t lock;
 	} Queue_t;
 
 	/*!	\brief Queue initialization (using dynamic queue allocation)
@@ -67,16 +65,15 @@ extern "C"
 										  const size_t size_rec, const uint16_t nb_recs,
 										  const QueueType type, const bool overwrite);
 
-	/*!	\brief Queue initialization (using static queue)
-	**	\param [in,out] pQ - pointer of queue to handle
-	**	\param [in] size_rec - size of a record in the queue (in bytes)
-	**	\param [in] nb_recs - number of records in the queue
-	**	\param [in] type - Queue implementation type: FIFO, LIFO
-	**	\param [in] overwrite - Overwrite previous records when queue is full
-	**	\param [in] pQDat - Pointer to static data queue
-	**	\param [in] lenQDat - Length of static data queue (in bytes) for static array size check against required size for queue
-	**	\return Queue tab address (to remain consistent with \ref q_init)
-	**/
+	/// @brief Queue initialization (using static queue)
+	/// @param pQ - pointer of queue to handle
+	/// @param size_rec - size of a record in the queue (in bytes)
+	/// @param nb_recs - number of records in the queue
+	/// @param type - Queue implementation type: FIFO, LIFO
+	/// @param overwrite - Overwrite previous records when queue is full
+	/// @param pQDat - Pointer to static data queue
+	/// @param lenQDat - Length of static data queue (in bytes) for static array size check against required size for queue
+	/// @return Queue tab address (to remain consistent with \ref q_init)
 	void *__attribute__((nonnull)) q_init_static(Queue_t *const pQ,
 												 const size_t size_rec, const uint16_t nb_recs,
 												 const QueueType type, const bool overwrite,

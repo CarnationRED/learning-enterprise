@@ -8,12 +8,16 @@
 #include "esp_system.h"
 #include "esp_private/esp_clk.h"
 #include "freertos/queue.h"
+#include "freertos/ringbuf.h"
 #include "freertos/idf_additions.h"
 #include "can.h"
 #include "msg.h"
+#include "drv_spi.h"
+#include "drv_canfdspi_api.h"
+#include "cQueue.h"
 
 #define UDS_TXQ_CAP MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL
-#define TX_UDSMSGNUM 4
+#define TX_UDSMSGNUM 12
 
 #define UDSSEND "uds send %s"
 #define UDSECU "uds ecu %s"
@@ -33,8 +37,8 @@ u8 *udsBuffer;
 StaticQueue_t udsStaticQueue;
 
 extern TaskHandle_t canRxHandle;
-extern TaskHandle_t wifiSendHandle;
-extern TaskHandle_t udsSendHandle;
+extern TaskHandle_t regularCanRxHandle;
+extern TaskHandle_t udsCanRxHandle;
 extern QueueHandle_t rxMsgFifo;
 extern QueueHandle_t txMsgFifo;
 extern void can_clearFilter();
@@ -116,7 +120,7 @@ u8 getDataOffset(u8 sid)
 {
     switch (sid)
     {
-        // clang-format off
+    // clang-format off
         case 0x01: case 0x41: return 2;
         case 0x03: case 0x43: return 2;
         case 0x09: case 0x49: return 3;
@@ -347,110 +351,121 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
             CAN_MSG_FRAME msg;
             // timeout value between each 2 frames, can be set larger if NRC78 is received
             u32 timeout = P2CAN_Client;
-            while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
+            // while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
+            while (1)
             {
-                if (msg.direction == 1)
-                    continue;
-                // if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
-                // {
-                //     ERRMSGFMT(UDSSEND, "fifo full");
-                // }
-                // else
-                //     xTaskNotifyGive(wifiSendHandle);
-
-                timeout = P2CAN_Client;
-                FrameData f = logAndTakeFrameData(&msg);
-                if (sendCompleted == 0)
+                if ((APP_RX_INT() || canrx_fifo_not_empty()) || ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout)))
                 {
-                    if (f.dlc == 0)
-                        continue;
-                    u8 first = f.data[0];
-                    if (first == 0x30)
+                    u8 r = DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &msg.rxObj, msg.data, MAX_DATA_BYTES);
+                    if (0 != r)
                     {
-                        // max block serial
-                        volatile u8 BS = f.data[1];
-                        // interval between continuous frames
-                        u32 STmin = getSTmin(f.data[2]);
-                        // frame serial
-                        volatile u8 SN = 1;
-                        // block serial
-                        volatile u16 BN = 0;
-                        // current frame data len
-                        volatile u32 frameDataLen;
-                        for (; sent < requestDataLength; sent += frameDataLen)
+                        ERRMSGFMT(UDSRECV, "get err");
+                        result.success = false;
+                        error = true;
+                        continue;
+                    }
+                    else
+                    {
+                        if (msg.direction == 1)
+                            continue;
+
+                        timeout = P2CAN_Client;
+                        FrameData f = logAndTakeFrameData(&msg);
+                        if (sendCompleted == 0)
                         {
-                            if (STmin > 1000)
-                                vTaskDelay(pdMS_TO_TICKS(STmin / 1000));
-                            else
-                                delay_us(STmin);
-
-                            frameDataLen = requestDataLength - sent;
-                            if (frameDataLen > 7)
-                                frameDataLen = 7;
-
-                            frame.data[0] = 0x20 + SN;
-                            for (u8 i = 1; i < 8; i++)
+                            if (f.dlc == 0)
+                                continue;
+                            u8 first = f.data[0];
+                            if (first == 0x30)
                             {
-                                frame.data[i] = *(dataCurrentPos++);
+                                // max block serial
+                                volatile u8 BS = f.data[1];
+                                // interval between continuous frames
+                                u32 STmin = getSTmin(f.data[2]);
+                                // frame serial
+                                volatile u8 SN = 1;
+                                // block serial
+                                volatile u16 BN = 0;
+                                // current frame data len
+                                volatile u32 frameDataLen;
+                                for (; sent < requestDataLength; sent += frameDataLen)
+                                {
+                                    if (STmin > 1000)
+                                        vTaskDelay(pdMS_TO_TICKS(STmin / 1000));
+                                    else
+                                        delay_us(STmin);
+
+                                    frameDataLen = requestDataLength - sent;
+                                    if (frameDataLen > 7)
+                                        frameDataLen = 7;
+
+                                    frame.data[0] = 0x20 + SN;
+                                    for (u8 i = 1; i < 8; i++)
+                                    {
+                                        frame.data[i] = *(dataCurrentPos++);
+                                    }
+
+                                    if (!logAndSendFrame(&frame))
+                                    {
+                                        ERRMSGFMT(UDSSEND, "fail");
+                                        result.success = false;
+                                        error = true;
+                                        break;
+                                    }
+                                    if (++SN > 0xF)
+                                        SN = 1;
+                                    if (++BN == BS)
+                                    {
+                                        BN = 0;
+                                        break;
+                                    }
+                                    if (sent > 4080 || frameDataLen == 0)
+                                    {
+                                        volatile u8 aa = 1;
+                                    }
+                                }
+                                if (sent == requestDataLength)
+                                {
+                                    sendCompleted = pdTICKS_TO_MS(xTaskGetTickCount());
+                                    continue;
+                                }
                             }
-
-                            if (!logAndSendFrame(&frame))
+                            else if (first == 0x31)
+                                continue;
+                            else if (first == 0x32)
                             {
-                                ERRMSGFMT(UDSSEND, "fail");
+                                ERRMSGFMT(UDSECU, "ovrflw");
                                 result.success = false;
                                 error = true;
                                 break;
                             }
-                            if (++SN > 0xF)
-                                SN = 1;
-                            if (++BN == BS)
+                        }
+                        else
+                        {
+                            if (f.dlc != 0)
                             {
-                                BN = 0;
+                                parseSingleFrame(sid, &f, response, &result);
+                                if (result.nrc == 0x78)
+                                {
+                                    timeout = 3300;
+                                    sendCompleted += 3300;
+                                    continue;
+                                }
+                                error = !result.success;
                                 break;
                             }
-                            if (sent > 4080 || frameDataLen == 0)
+                            else if (pdTICKS_TO_MS(xTaskGetTickCount()) - sendCompleted >= P2CAN_Client)
                             {
-                                volatile u8 aa = 1;
+                                result.success = false;
+                                error = true;
+                                ERRMSGFMT(UDSECU, "didn't response in time");
+                                break;
                             }
                         }
-                        if (sent == requestDataLength)
-                        {
-                            sendCompleted = pdTICKS_TO_MS(xTaskGetTickCount());
-                            continue;
-                        }
-                    }
-                    else if (first == 0x31)
-                        continue;
-                    else if (first == 0x32)
-                    {
-                        ERRMSGFMT(UDSECU, "ovrflw");
-                        result.success = false;
-                        error = true;
-                        break;
                     }
                 }
                 else
-                {
-                    if (f.dlc != 0)
-                    {
-                        parseSingleFrame(sid, &f, response, &result);
-                        if (result.nrc == 0x78)
-                        {
-                            timeout = 3300;
-                            sendCompleted += 3300;
-                            continue;
-                        }
-                        error = !result.success;
-                        break;
-                    }
-                    else if (pdTICKS_TO_MS(xTaskGetTickCount()) - sendCompleted >= P2CAN_Client)
-                    {
-                        result.success = false;
-                        error = true;
-                        ERRMSGFMT(UDSECU, "didn't response in time");
-                        break;
-                    }
-                }
+                    break;
             }
             if (!result.success && !error)
             {
@@ -494,120 +509,137 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
             CAN_MSG_FRAME msg;
             // timeout value between each 2 frames, can be set larger if NRC78 is received
             u32 timeout = P2CAN_Client;
-            while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
+            // while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
+            while (1)
             {
-                if (msg.direction == 1)
+                if ((APP_RX_INT() || canrx_fifo_not_empty()) || ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout)))
                 {
-                    continue;
-                }
-                if (msg.data[1] == 0x67)
-                {
-                    volatile u8 aa = 0;
-                }
-                // if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
-                // {
-                //     report("uds up fifo full");
-                // }
-                // else
-                //     xTaskNotifyGive(wifiSendHandle);
-
-                timeout = P2CAN_Client;
-                FrameData recvFrame = logAndTakeFrameData(&msg);
-                if (isNRC78Frame(&recvFrame))
-                {
-                    timeout = 3300;
-                    report("NRC78");
-                    if (isECUBusy)
-                        continue;
-                    else
+                    u8 r = DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &msg.rxObj, msg.data, MAX_DATA_BYTES);
+                    if (0 != r)
                     {
-                        ERRMSGFMT(UDSECU, "rspns err");
+                        ERRMSGFMT(UDSRECV, "get err");
                         result.success = false;
                         error = true;
-                        break;
+                        continue;
                     }
-                }
-                else
-                    isECUBusy = false;
-                // 收到首帧，或收到单帧
-                if (!isLongMessage)
-                {
-                    // 收到首帧
-                    if (isFirstFrame(&recvFrame, &totalLen))
+                    else
                     {
-                        totalFrames = (totalLen - 6) / 7 + 1;
-                        if ((totalLen - 6) % 7 != 0)
-                            totalFrames++;
-                        receivedFrames = 1;
-                        isLongMessage = true;
-                        received = recvFrame.dlc - (2 + getDataOffset(sid));
-                        memcpy(response->data, recvFrame.data + 2 + getDataOffset(sid), received);
-
-                        // 发送流控帧
-                        vTaskDelay(pdMS_TO_TICKS(5));
-                        frame.dlc = request->txObj.bF.ctrl.DLC;
-                        frame.data[0] = 0x30;
-                        memset(frame.data + 1, 0, 7);
-                        if (logAndSendFrame(&frame))
+                        if (msg.direction == 1)
                         {
-                            SN = 1;
-                            timeout = 1000;
                             continue;
                         }
+                        if (msg.data[1] == 0x67)
+                        {
+                            volatile u8 aa = 0;
+                        }
+                        // if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
+                        // {
+                        //     report("uds up fifo full");
+                        // }
+                        // else
+                        //     xTaskNotifyGive(wifiSendHandle);
+
+                        timeout = P2CAN_Client;
+                        FrameData recvFrame = logAndTakeFrameData(&msg);
+                        if (isNRC78Frame(&recvFrame))
+                        {
+                            timeout = 3300;
+                            report("NRC78");
+                            if (isECUBusy)
+                                continue;
+                            else
+                            {
+                                ERRMSGFMT(UDSECU, "rspns err");
+                                result.success = false;
+                                error = true;
+                                break;
+                            }
+                        }
+                        else
+                            isECUBusy = false;
+                        // 收到首帧，或收到单帧
+                        if (!isLongMessage)
+                        {
+                            // 收到首帧
+                            if (isFirstFrame(&recvFrame, &totalLen))
+                            {
+                                totalFrames = (totalLen - 6) / 7 + 1;
+                                if ((totalLen - 6) % 7 != 0)
+                                    totalFrames++;
+                                receivedFrames = 1;
+                                isLongMessage = true;
+                                received = recvFrame.dlc - (2 + getDataOffset(sid));
+                                memcpy(response->data, recvFrame.data + 2 + getDataOffset(sid), received);
+
+                                // 发送流控帧
+                                vTaskDelay(pdMS_TO_TICKS(5));
+                                frame.dlc = request->txObj.bF.ctrl.DLC;
+                                frame.data[0] = 0x30;
+                                memset(frame.data + 1, 0, 7);
+                                if (logAndSendFrame(&frame))
+                                {
+                                    SN = 1;
+                                    timeout = 1000;
+                                    continue;
+                                }
+                                else
+                                {
+                                    ERRMSGFMT(UDSSEND, "fc fail");
+                                    result.success = false;
+                                    error = true;
+                                    break;
+                                }
+                            }
+                            // 收到单帧答复
+                            else
+                            {
+                                parseSingleFrame(sid, &recvFrame, response, &result);
+                                break;
+                            }
+                        }
+                        // 接收连续帧
                         else
                         {
-                            ERRMSGFMT(UDSSEND, "fc fail");
-                            result.success = false;
-                            error = true;
-                            break;
+                            u8 first = recvFrame.data[0];
+                            // 校验连续帧的序列号 0x21...
+                            if ((first & 0xF0) == 0x20 && (first & 0x0F) == SN)
+                            {
+                                SN++;
+                                if (SN == 0x10)
+                                    SN = 0x01;
+                                // 将收到的一帧数据，添加到总结果中
+                                memcpy(&response->data[received], &recvFrame.data[1], recvFrame.dlc - 1);
+                                received += recvFrame.dlc - 1;
+                                receivedFrames++;
+                                if (receivedFrames == totalFrames)
+                                {
+                                    result.success = true;
+                                    result.errorMessage[0] = '\0';
+                                    error = false;
+                                    response->dataLen = received;
+                                    break;
+                                }
+                                if (received - totalLen >= 7)
+                                {
+                                    ERRMSGFMT(UDSECU, "msg len err");
+                                    result.success = false;
+                                    error = true;
+                                    break;
+                                }
+                                continue;
+                            }
+                            else
+                            {
+                                ERRMSGFMT(UDSECU, "msg SN err");
+                                result.success = false;
+                                error = true;
+                                break;
+                            }
                         }
                     }
-                    // 收到单帧答复
-                    else
-                    {
-                        parseSingleFrame(sid, &recvFrame, response, &result);
-                        break;
-                    }
                 }
-                // 接收连续帧
                 else
-                {
-                    u8 first = recvFrame.data[0];
-                    // 校验连续帧的序列号 0x21...
-                    if ((first & 0xF0) == 0x20 && (first & 0x0F) == SN)
-                    {
-                        SN++;
-                        if (SN == 0x10)
-                            SN = 0x01;
-                        // 将收到的一帧数据，添加到总结果中
-                        memcpy(&response->data[received], &recvFrame.data[1], recvFrame.dlc - 1);
-                        received += recvFrame.dlc - 1;
-                        receivedFrames++;
-                        if (receivedFrames == totalFrames)
-                        {
-                            result.success = true;
-                            result.errorMessage[0] = '\0';
-                            error = false;
-                            response->dataLen = received;
-                            break;
-                        }
-                        if (received - totalLen >= 7)
-                        {
-                            ERRMSGFMT(UDSECU, "msg len err");
-                            result.success = false;
-                            error = true;
-                            break;
-                        }
-                        continue;
-                    }
-                    else
-                    {
-                        ERRMSGFMT(UDSECU, "msg SN err");
-                        result.success = false;
-                        error = true;
-                        break;
-                    }
-                }
+                    break;
             }
             if (!result.success && !error)
             {
@@ -628,6 +660,10 @@ CAN_CMD_UDSFRAME *txUdsMsg1;
 CAN_CMD_UDSFRAME *txUdsMsgForMqtt;
 static void uds_task()
 {
+    // udsBuffer = (uint8_t *)heap_caps_malloc(TX_UDSMSGNUM * sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
+    assert(txUDSFifo = xQueueCreateWithCaps(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), UDS_TXQ_CAP));
+
+    assert(txUDSFifo);
     txUdsMsg1 = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
     txUdsMsgForMqtt = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
     rxUdsMsg = (CAN_MSG_UDSFRAME *)heap_caps_malloc(sizeof(CAN_MSG_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
@@ -636,7 +672,7 @@ static void uds_task()
     {
         if (!xQueueReceive(txUDSFifo, txUdsMsg1, portMAX_DELAY))
             continue;
-        canRxHandle = udsSendHandle;
+        canRxHandle = udsCanRxHandle;
         udsRunning = true;
         transferLog = txUdsMsg1->txObj.bF.ctrl.unimplemented1;
         UDSResult udsRes = udsRequest(txUdsMsg1, rxUdsMsg);
@@ -644,11 +680,11 @@ static void uds_task()
         rxUdsMsg->nrc = udsRes.nrc;
         int len = sizeof(CAN_MSG_UDSFRAME) - (4096 - rxUdsMsg->dataLen);
         u8 space = uxQueueSpacesAvailable(txUDSFifo);
-        rxUdsMsg->rxObj.bF.ctrl.unimplemented2 = space;
+        rxUdsMsg->rxObj.bF.ctrl.unimplemented2 = (u32)space;
         ESP_LOGI("uds task", "queue remain:%d", space);
         canSend2Wifi((u8 *)rxUdsMsg, len);
         udsRunning = false;
-        canRxHandle = wifiSendHandle;
+        canRxHandle = regularCanRxHandle;
     }
 }
 /// @brief The basic idea of this function is to allow only a portion of CMD being transfered over wifi when there's not much data in a UDS request
@@ -683,11 +719,7 @@ CAN_CMD_UDSFRAME *uds_enqueue_msg(u8 *msg, u16 len)
 
 void uds_init()
 {
-    // udsBuffer = (uint8_t *)heap_caps_malloc(TX_UDSMSGNUM * sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
-    assert(txUDSFifo = xQueueCreateWithCaps(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), UDS_TXQ_CAP));
-
-    assert(txUDSFifo);
-    xTaskCreatePinnedToCore(uds_task, "uds task", 4096, NULL, 10, &udsSendHandle, 1);
+    xTaskCreatePinnedToCore(uds_task, "uds task", 4096, NULL, 24, &udsCanRxHandle, 1);
 
     canQueueUDSPtr = uds_enqueue_msg;
 }
