@@ -74,7 +74,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         esp_wifi_connect();
         led1Flash2(15, 0xffffffff, 95);
 
-        //force reset!!, this solves most errors
+        // force reset!!, this solves most errors
         esp_restart();
         subscribed = false;
         break;
@@ -146,7 +146,7 @@ static void mqtt_app_start(void)
         .broker.address.uri = uri,
         // .session.keepalive = 2, // 1s
         .session.disable_keepalive = false, // 1s
-        .network.timeout_ms =2000,
+        .network.timeout_ms = 2000,
         .network.reconnect_timeout_ms = 2000,
         // .broker.address.port = 2222,
         .task.priority = 5,
@@ -165,6 +165,13 @@ void (*mqtt_start)(void) = &mqtt_app_start;
 void mqtt_dataUp_pulish(char *data, int len)
 {
     int msg_id;
+
+    if (len == 80)
+    {
+        if (data[0] == 0xff && data[1] == 0xff && data[2] == 0xff)
+            ESP_LOGE("mqtt", "CAN_MSG_FRAME err");
+    }
+
     int s = heap_caps_get_free_size(MALLOC_CAP_8BIT) / 1024;
     if (s < 8)
     {

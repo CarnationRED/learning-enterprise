@@ -23,6 +23,7 @@ typedef enum _DataDownMsgType
     SET_FILTER,
     SET_CANCHL,
     KEEP_ALIVE,
+    LOOP_FRAMES,
     UNDEFINED = 0xff
 } DataDownMsgType;
 /// @brief DownData Structure: [DataDownMsg][DataStruct0][DataStruct1][DataStruct2]...
@@ -133,6 +134,7 @@ typedef struct
 
     u8 success;
     u8 nrc;
+    u8 sid;
     u8 errorMessage[32];
 
     u8 data[4096];
@@ -155,6 +157,16 @@ typedef struct
     u8 data[64];
 } CAN_MSG_FRAME;
 
+typedef struct
+{
+    CAN_CMD_FRAME frame0;
+    CAN_CMD_FRAME frame1;
+    CAN_CMD_FRAME frame2;
+    CAN_CMD_FRAME frame3;
+    u16 interval;
+    u8 enabled;
+    u8 count;
+} CAN_LOOP_FRAMES;
 
 typedef enum
 {

@@ -45,6 +45,7 @@ bool (*canQueueMultiPtr)(CAN_CMD_MULTIFRAME *msgs);
 CAN_CMD_UDSFRAME *(*canQueueUDSPtr)(u8 *msg, u16 len);
 bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt);
 bool (*canSetCanChlPtr)(u8 *channel);
+bool (*canSetLoopPtr)(CAN_LOOP_FRAMES* loop);
 extern void (*dataDownHandler)(int len, uint8_t *data);
 extern void (*dataCtrlHandler)(int len, uint8_t *data);
 static CAN_CMD_MULTIFRAME *frames;
@@ -184,6 +185,20 @@ void dataCtrl(int len, u8 *data)
                 break;
             case KEEP_ALIVE:
                 mqtt_report_pulish("pingok", 0);
+                return;
+            case LOOP_FRAMES:
+                if (head->dataLen == head->elementSize * head->elementCount)
+                {
+                    if (canSetLoopPtr != NULL)
+                    {
+                        success = true;
+                        success &= canSetLoopPtr((CAN_LOOP_FRAMES *)(ptr + sizeof(DataDownMsg)));
+                    }
+                    // canSendOneFrame((CAN_CMD_FRAME *)ptr);
+                }
+                else
+                    msgStats = MSG_DATALEN_MISMATCH;
+                msg->responseType = LOOP_FRAMES;
                 return;
             default:
                 msgStats = MSG_DATA_FORMAT_ERROR;

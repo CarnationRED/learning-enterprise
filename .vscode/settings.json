@@ -1,7 +1,7 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
   "idf.adapterTargetName": "esp32s3",
-  "idf.portWin": "COM7",
+  "idf.portWin": "COM9",
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
@@ -66,6 +66,8 @@
     "doip.h": "c",
     "led.h": "c",
     "cstddef": "c",
-    "queue.h": "c"
+    "queue.h": "c",
+    "cstring": "c",
+    "*.inc": "c"
   }
 }

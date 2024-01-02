@@ -59,6 +59,10 @@ QueueHandle_t txMsgFifo;
 QueueHandle_t txMultiMsgFifo;
 QueueSetHandle_t txFifoSet;
 
+static CAN_LOOP_FRAMES loopFrames;
+static u8 loopFrameEnabled = 0;
+TaskHandle_t loopFrameHandle = 0;
+
 static CAN_MSG_FRAME msg = {.direction = 0};
 uint8_t canSendWifiTxBuffer[8192];
 long wifiSent = 0, canSent = 0, recvedMsgs = 0;
@@ -68,6 +72,7 @@ extern bool (*canQueuePtr)(CAN_CMD_FRAME *msg);
 extern bool (*canQueueMultiPtr)(CAN_CMD_MULTIFRAME *msgs);
 extern bool (*canSetFilterPtr)(CAN_FILTER_CFG *flt);
 extern bool (*canSetCanChlPtr)(u8 *channel);
+extern bool (*canSetLoopPtr)(CAN_LOOP_FRAMES *l);
 extern bool mqttconnected;
 static char *canErrStr = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\0";
 
@@ -127,9 +132,10 @@ static void IRAM_ATTR can_rx_int_handler(u8 para)
     BaseType_t xHigherProrityTaskWoken = pdFALSE;
     msg.channel = canCurrentChannel;
     vTaskNotifyGiveFromISR(canRxHandle, &xHigherProrityTaskWoken);
-    crs = 0; rxtick=xTaskGetTickCountFromISR();
+    crs = 0;
+    rxtick = xTaskGetTickCountFromISR();
     portYIELD_FROM_ISR(xHigherProrityTaskWoken);
-                    recvedMsgs++;
+    recvedMsgs++;
 }
 void canChannelInit()
 {
@@ -172,11 +178,11 @@ static void task_canrx()
             }
             else
             {
-                if(!crs)
+                if (!crs)
                 {
-                    crs=1;
-                    rxtick=xTaskGetTickCount()-rxtick;
-                    if(rxtick>4)
+                    crs = 1;
+                    rxtick = xTaskGetTickCount() - rxtick;
+                    if (rxtick > 4)
                         ESP_LOGE("rxdelay", "%d", rxtick);
                 }
 
@@ -355,13 +361,14 @@ static void task_dbg_print()
 }
 void can_init()
 {
-    // canChannelInit();
-    // SWENABLE();
+    canChannelInit();
+    SWENABLE();
     spican_rx_int_ptr = &can_rx_int_handler;
     canQueuePtr = canEnqueueOneFrame;
     canQueueMultiPtr = canEnqueueMultiFrame;
     canSetFilterPtr = canSetFilter;
     canSetCanChlPtr = canSetCanChl;
+    canSetLoopPtr=canSetLoop;
     // q_init(&txMsgFifo, sizeof(CAN_CMD_FRAME), 1000, FIFO, false);
     // q_init(&rxMsgFifo, sizeof(CAN_MSG_FRAME), 1000, FIFO, false);
     rxMsgFifo = xQueueCreate(RX_MSGLEN, sizeof(CAN_MSG_FRAME));
@@ -373,12 +380,41 @@ void can_init()
     xQueueAddToSet(txMultiMsgFifo, txFifoSet);
 
     APP_CANFDSPI_Init(NULL);
-    
+
     xTaskCreatePinnedToCore(task_canrx, "task_canrx", 4096, NULL, 24, &regularCanRxHandle, 1);
     xTaskCreatePinnedToCore(task_cantx, "task_cantx", 4096, NULL, 24, &txHandle, 1);
     xTaskCreatePinnedToCore(task_can2wifi, "task_can2wifi", 4096, NULL, 11, &wifiSendHandle, 0);
     xTaskCreatePinnedToCore(task_dbg_print, "task_dbg_print", 3072, NULL, 0, NULL, 0);
     canRxHandle = wifiSendHandle;
+}
+static void task_loop()
+{
+    while (loopFrames.enabled)
+    {
+        size_t i = 0;
+        if (i++ < loopFrames.count)
+            canSendOneFrame(&(loopFrames.frame0));
+        if (i++ < loopFrames.count)
+            canSendOneFrame(&(loopFrames.frame1));
+        if (i++ < loopFrames.count)
+            canSendOneFrame(&(loopFrames.frame2));
+        if (i++ < loopFrames.count)
+            canSendOneFrame(&(loopFrames.frame3));
+        vTaskDelay(pdMS_TO_TICKS(loopFrames.interval));
+    }
+}
+void canSetLoop(CAN_LOOP_FRAMES *loops)
+{
+    loopFrameEnabled = loops->enabled;
+    memcpy(&loopFrames, loops, sizeof(CAN_LOOP_FRAMES));
+
+    if (loopFrameHandle)
+    {
+        vTaskDelete(loopFrameHandle);
+        loopFrameHandle = 0;
+    }
+    if (loopFrameEnabled)
+        xTaskCreatePinnedToCore(task_loop, "task_loop", 3072, NULL, 20, &loopFrameHandle, 1);
 }
 void can_clearFilter()
 {
@@ -529,7 +565,7 @@ bool canSwitchChannel(u8 channel)
     // 1		0		11/12		1				DRV_CANFDSPI_INDEX_0
     // 0		1		3/8			2				DRV_CANFDSPI_INDEX_0
     // 1		1		2/10		3				DRV_CANFDSPI_INDEX_0
-    if (!(channel >= 0 && channel <= 4))
+    if (!(channel >= 0 && channel <= 3))
         return false;
     u8 b = channel != canCurrentChannel;
     if (b)
@@ -545,6 +581,7 @@ bool canSwitchChannel(u8 channel)
             _canWaitTxFifoEmpty();
             SW0_1();
             SW1_0();
+            break;
         case 2:
             _canWaitTxFifoEmpty();
             SW0_0();
@@ -645,7 +682,7 @@ bool canSendOneFrame(CAN_CMD_FRAME *msg1)
     return false;
 }
 
-static bool canSetFilter(CAN_FILTER_CFG *flt)
+bool canSetFilter(CAN_FILTER_CFG *flt)
 {
     CAN_FILTER f = (CAN_FILTER)flt->filterId;
     u8 s = DRV_CANFDSPI_FilterDisable(DRV_CANFDSPI_INDEX_0, f);

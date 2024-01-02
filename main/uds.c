@@ -16,7 +16,7 @@
 #include "drv_canfdspi_api.h"
 #include "cQueue.h"
 
-#define UDS_TXQ_CAP MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL
+#define UDS_RAM_CAP MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL
 #define TX_UDSMSGNUM 12
 
 #define UDSSEND "uds send %s"
@@ -120,7 +120,7 @@ u8 getDataOffset(u8 sid)
 {
     switch (sid)
     {
-    // clang-format off
+        // clang-format off
         case 0x01: case 0x41: return 2;
         case 0x03: case 0x43: return 2;
         case 0x09: case 0x49: return 3;
@@ -218,19 +218,6 @@ FrameData logAndTakeFrameData(CAN_MSG_FRAME *frame)
     frame->rxObj.bF.timeStamp = pdTICKS_TO_MS(xTaskGetTickCount());
     canSend2Wifi((void *)frame, sizeof(CAN_MSG_FRAME));
 
-    // BaseType_t receiveTaskWoken = pdFALSE;
-    // if (!xQueueSendFromISR(rxMsgFifo, (void *)&frame, &receiveTaskWoken))
-    // {
-    //     report("can recv fifo full, discard");
-    // }
-    // else
-    // {
-    //     xTaskNotifyGive(wifiSendHandle);
-    //     if (receiveTaskWoken)
-    //     {
-    //         portYIELD_FROM_ISR();
-    //     }
-    // }
     return array;
 }
 
@@ -295,15 +282,32 @@ bool logAndSendFrame(FrameData *frame)
 
 UDSResult udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 {
-    UDSResult r = do_udsRequest(request, response);
-    return r;
+    canSetFilter(&request->filter);
+
+    size_t i = 0;
+    if (request->data[0] == 0x27)
+        i = 2;
+    for (;;)
+    {
+        UDSResult r = do_udsRequest(request, response);
+        if (r.success || i++ == 2)
+        {
+            if (!r.success)
+            {
+                ESP_LOGW("uds fail", "retry:%d", i);
+            }
+            return r;
+        }
+        delay_us(10000);
+        ESP_LOGW("uds", "retry:%d", i);
+    }
 }
 UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
 {
-    UDSResult result = {.success = false, .errorMessage = &response->errorMessage};
+    UDSResult result = {.success = false, .errorMessage = &response->errorMessage, .nrc = 0};
     bool error = false;
     bool responseComplete = false;
-    u32 P2CAN_Client = 500;
+    u32 P2CAN_Client = 250;
     u32 requestDataLength = request->dataLen;
 
     response->dataLen = 0;
@@ -322,6 +326,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
     }
 
     cmd.txObj = request->txObj;
+    cmd.channel = request->channel;
 
     xQueueReset(rxMsgFifo);
     // setAndFilterSendRecvAddress(request);
@@ -349,19 +354,19 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
             // time in ms when send operation completes
             u32 sendCompleted = 0;
             CAN_MSG_FRAME msg;
+            msg.channel = canCurrentChannel;
             // timeout value between each 2 frames, can be set larger if NRC78 is received
             u32 timeout = P2CAN_Client;
             // while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
             while (1)
             {
-                if ((APP_RX_INT() || canrx_fifo_not_empty()) || ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout)))
+                if (APP_RX_INT() || canrx_fifo_not_empty() || ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout)))
                 {
-                    u8 r = DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &msg.rxObj, msg.data, MAX_DATA_BYTES);
+                    u8 r = 1;
+                    if (canrx_fifo_not_empty())
+                        r = DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &msg.rxObj, msg.data, MAX_DATA_BYTES);
                     if (0 != r)
                     {
-                        ERRMSGFMT(UDSRECV, "get err");
-                        result.success = false;
-                        error = true;
                         continue;
                     }
                     else
@@ -500,26 +505,26 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
             result.success = false;
             bool isECUBusy = true;
             bool isLongMessage = false;
-            u16 totalLen = 0;
+            u16 totalBytes = 0;
             u16 totalFrames = 0;
-            u16 received = 0;
+            u16 receivedBytes = 0;
             u8 receivedFrames = 0;
             u8 SN = 0;
 
             CAN_MSG_FRAME msg;
+            msg.channel = canCurrentChannel;
             // timeout value between each 2 frames, can be set larger if NRC78 is received
             u32 timeout = P2CAN_Client;
             // while (xQueueReceive(rxMsgFifo, &msg, pdMS_TO_TICKS(timeout)))
             while (1)
             {
-                if ((APP_RX_INT() || canrx_fifo_not_empty()) || ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout)))
+                if (APP_RX_INT() || canrx_fifo_not_empty() || ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout)))
                 {
-                    u8 r = DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &msg.rxObj, msg.data, MAX_DATA_BYTES);
+                    u8 r = 1;
+                    if (canrx_fifo_not_empty())
+                        r = DRV_CANFDSPI_ReceiveMessageGet(DRV_CANFDSPI_INDEX_0, APP_RX_FIFO, &msg.rxObj, msg.data, MAX_DATA_BYTES);
                     if (0 != r)
                     {
-                        ERRMSGFMT(UDSRECV, "get err");
-                        result.success = false;
-                        error = true;
                         continue;
                     }
                     else
@@ -528,16 +533,6 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                         {
                             continue;
                         }
-                        if (msg.data[1] == 0x67)
-                        {
-                            volatile u8 aa = 0;
-                        }
-                        // if (!xQueueSend(rxMsgFifo, (void *)&msg, 0))
-                        // {
-                        //     report("uds up fifo full");
-                        // }
-                        // else
-                        //     xTaskNotifyGive(wifiSendHandle);
 
                         timeout = P2CAN_Client;
                         FrameData recvFrame = logAndTakeFrameData(&msg);
@@ -561,15 +556,15 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                         if (!isLongMessage)
                         {
                             // 收到首帧
-                            if (isFirstFrame(&recvFrame, &totalLen))
+                            if (isFirstFrame(&recvFrame, &totalBytes))
                             {
-                                totalFrames = (totalLen - 6) / 7 + 1;
-                                if ((totalLen - 6) % 7 != 0)
+                                totalFrames = (totalBytes - 6) / 7 + 1;
+                                if ((totalBytes - 6) % 7 != 0)
                                     totalFrames++;
                                 receivedFrames = 1;
                                 isLongMessage = true;
-                                received = recvFrame.dlc - (2 + getDataOffset(sid));
-                                memcpy(response->data, recvFrame.data + 2 + getDataOffset(sid), received);
+                                receivedBytes = recvFrame.dlc - (2 + getDataOffset(sid));
+                                memcpy(response->data, recvFrame.data + 2 + getDataOffset(sid), receivedBytes);
 
                                 // 发送流控帧
                                 vTaskDelay(pdMS_TO_TICKS(5));
@@ -593,6 +588,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                             // 收到单帧答复
                             else
                             {
+                                receivedFrames++;
                                 parseSingleFrame(sid, &recvFrame, response, &result);
                                 break;
                             }
@@ -608,18 +604,18 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                                 if (SN == 0x10)
                                     SN = 0x01;
                                 // 将收到的一帧数据，添加到总结果中
-                                memcpy(&response->data[received], &recvFrame.data[1], recvFrame.dlc - 1);
-                                received += recvFrame.dlc - 1;
+                                memcpy(&response->data[receivedBytes], &recvFrame.data[1], recvFrame.dlc - 1);
+                                receivedBytes += recvFrame.dlc - 1;
                                 receivedFrames++;
                                 if (receivedFrames == totalFrames)
                                 {
                                     result.success = true;
                                     result.errorMessage[0] = '\0';
                                     error = false;
-                                    response->dataLen = received;
+                                    response->dataLen = receivedBytes;
                                     break;
                                 }
-                                if (received - totalLen >= 7)
+                                if (receivedBytes - totalBytes >= 7)
                                 {
                                     ERRMSGFMT(UDSECU, "msg len err");
                                     result.success = false;
@@ -641,7 +637,7 @@ UDSResult do_udsRequest(CAN_CMD_UDSFRAME *request, CAN_MSG_UDSFRAME *response)
                 else
                     break;
             }
-            if (!result.success && !error)
+            if (!result.success && !receivedFrames && result.nrc == 0)
             {
                 ERRMSGFMT(UDSECU, "didn't response in time");
                 error = true;
@@ -661,23 +657,28 @@ CAN_CMD_UDSFRAME *txUdsMsgForMqtt;
 static void uds_task()
 {
     // udsBuffer = (uint8_t *)heap_caps_malloc(TX_UDSMSGNUM * sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_SPIRAM | MALLOC_CAP_DEFAULT);
-    assert(txUDSFifo = xQueueCreateWithCaps(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), UDS_TXQ_CAP));
+    assert(txUDSFifo = xQueueCreateWithCaps(TX_UDSMSGNUM, sizeof(CAN_CMD_UDSFRAME), UDS_RAM_CAP));
 
     assert(txUDSFifo);
-    txUdsMsg1 = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
-    txUdsMsgForMqtt = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
-    rxUdsMsg = (CAN_MSG_UDSFRAME *)heap_caps_malloc(sizeof(CAN_MSG_UDSFRAME), MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+    txUdsMsg1 = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), UDS_RAM_CAP);
+    txUdsMsgForMqtt = (CAN_CMD_UDSFRAME *)heap_caps_malloc(sizeof(CAN_CMD_UDSFRAME), UDS_RAM_CAP);
+    rxUdsMsg = (CAN_MSG_UDSFRAME *)heap_caps_malloc(sizeof(CAN_MSG_UDSFRAME), UDS_RAM_CAP);
     assert(txUDSFifo);
     while (1)
     {
+        // TickType_t t = xTaskGetTickCount();
         if (!xQueueReceive(txUDSFifo, txUdsMsg1, portMAX_DELAY))
             continue;
+        // t = xTaskGetTickCount() - t;
+        // if (t > 200)
+        //     ESP_LOGW("uds task", "spent %ld tick taking", t);
         canRxHandle = udsCanRxHandle;
         udsRunning = true;
         transferLog = txUdsMsg1->txObj.bF.ctrl.unimplemented1;
         UDSResult udsRes = udsRequest(txUdsMsg1, rxUdsMsg);
         rxUdsMsg->success = udsRes.success;
         rxUdsMsg->nrc = udsRes.nrc;
+        rxUdsMsg->sid = txUdsMsg1->data[0];
         int len = sizeof(CAN_MSG_UDSFRAME) - (4096 - rxUdsMsg->dataLen);
         u8 space = uxQueueSpacesAvailable(txUDSFifo);
         rxUdsMsg->rxObj.bF.ctrl.unimplemented2 = (u32)space;

@@ -216,7 +216,7 @@ void led_init2()
         .on_alarm = led1_cb,
     };
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(gptimer1, &cbs, NULL));
-    cbs.on_alarm =led2_cb;
+    cbs.on_alarm = led2_cb;
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(gptimer2, &cbs, NULL));
 
     ESP_LOGI(TAG, "Enable timer");
@@ -247,7 +247,7 @@ void led1Flash2(uint8_t hz, uint32_t times, uint8_t brightness)
     assert(gptimer1);
     assert(gptimer2);
 
-    ESP_LOGI("","alarm_count%ld",(long)alarm_config1.alarm_count);
+    // ESP_LOGI("","alarm_count%ld",(long)alarm_config1.alarm_count);
     ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer1, &alarm_config1));
 
     gptimer_stop(gptimer1);
